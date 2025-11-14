@@ -1,0 +1,155 @@
+{
+  "name": "debug-dataStructures-visualizer-extension",
+  "displayName": "Debug Data Structures Visualizer",
+  "description": "Visualize binary trees and other data structures during debugging with interactive D3.js visualization. Supports Python and Java debugging.",
+  "version": "1.0.0",
+  "publisher": "MCCProgrammer",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Visualization",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "debug",
+    "visualization",
+    "data-structures",
+    "binary-tree",
+    "tree",
+    "d3",
+    "python",
+    "java",
+    "debugger"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MCCProgrammer/github-style-markdown-preview"
+  },
+  "activationEvents": [],
+  "browser": "./dist/web/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dataStructuresVisualizer.openVisualizer",
+        "title": "Open Data Structure Visualizer",
+        "icon": "$(graph)",
+        "category": "Data Structures Visualizer"
+      },
+      {
+        "command": "dataStructuresVisualizer.refreshVisualization",
+        "title": "Refresh Visualization",
+        "icon": "$(refresh)",
+        "category": "Data Structures Visualizer"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "dataStructuresVisualizer.openVisualizer",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+opt+v",
+        "when": "debugState == 'stopped'"
+      },
+      {
+        "command": "dataStructuresVisualizer.refreshVisualization",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "activeWebviewPanelId == 'dataStructuresVisualizer'"
+      }
+    ],
+    "menus": {
+      "debug/toolbar": [
+        {
+          "command": "dataStructuresVisualizer.openVisualizer",
+          "when": "debugState == 'stopped'",
+          "group": "visualization"
+        }
+      ],
+      "webview/title": [
+        {
+          "command": "dataStructuresVisualizer.refreshVisualization",
+          "when": "webviewId == dataStructuresVisualizer",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Data Structures Visualizer",
+      "properties": {
+        "dataStructuresVisualizer.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh visualization when debug state changes"
+        },
+        "dataStructuresVisualizer.defaultAttributes": {
+          "type": "array",
+          "default": ["value", "key", "data"],
+          "description": "Default attributes to display for tree nodes",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dataStructuresVisualizer.leftChildName": {
+          "type": "string",
+          "default": "left",
+          "description": "Name of the left child attribute in binary trees"
+        },
+        "dataStructuresVisualizer.rightChildName": {
+          "type": "string",
+          "default": "right",
+          "description": "Name of the right child attribute in binary trees"
+        },
+        "dataStructuresVisualizer.nodeValueAttribute": {
+          "type": "string",
+          "default": "value",
+          "description": "Name of the attribute to display as node value (fallback: key, data, val)"
+        },
+        "dataStructuresVisualizer.maxDepth": {
+          "type": "number",
+          "default": 20,
+          "description": "Maximum depth to traverse when building tree structure",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "dataStructuresVisualizer.showDebugControls": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show debug control buttons (Step Over, Step Into, etc.) in the visualization"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "vscode-test-web --browserType=chromium --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test/suite/extensionTests.js",
+    "pretest": "npm run compile-web",
+    "vscode:prepublish": "npm run package-web",
+    "compile-web": "npm run check-types && npm run lint && node esbuild.js",
+    "watch-web": "npm-run-all -p watch-web:*",
+    "watch-web:esbuild": "node esbuild.js --watch",
+    "watch-web:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package-web": "npm run check-types && npm run lint && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "run-in-browser": "vscode-test-web --browserType=chromium --extensionDevelopmentPath=. ."
+  },
+  "devDependencies": {
+    "@esbuild-plugins/node-globals-polyfill": "^0.2.3",
+    "@types/assert": "^1.5.11",
+    "@types/mocha": "^10.0.10",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "@vscode/test-web": "^0.0.74",
+    "assert": "^2.1.0",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.36.0",
+    "glob": "^11.0.3",
+    "mocha": "^11.7.4",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {}
+}
