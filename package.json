@@ -79,11 +79,6 @@
     "configuration": {
       "title": "Data Structures Visualizer",
       "properties": {
-        "dataStructuresVisualizer.autoRefresh": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically refresh visualization when debug state changes"
-        },
         "dataStructuresVisualizer.defaultAttributes": {
           "type": "array",
           "default": ["value", "key", "data"],
@@ -118,6 +113,40 @@
           "type": "boolean",
           "default": true,
           "description": "Show debug control buttons (Step Over, Step Into, etc.) in the visualization"
+        },
+        "dataStructuresVisualizer.languagePresets": {
+          "type": "object",
+          "default": {
+            "python": {
+              "leftChildName": "left",
+              "rightChildName": "right",
+              "nodeValueAttribute": "val"
+            },
+            "java": {
+              "leftChildName": "left",
+              "rightChildName": "right",
+              "nodeValueAttribute": "val"
+            }
+          },
+          "description": "Language-specific presets for attribute names. Automatically applied when a debug session starts."
+        },
+        "dataStructuresVisualizer.autoDetectLanguage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect programming language and apply appropriate presets"
+        },
+        "dataStructuresVisualizer.treeOrientation": {
+          "type": "string",
+          "enum": ["horizontal", "vertical"],
+          "default": "horizontal",
+          "description": "Orientation of the tree visualization. Horizontal: left to right. Vertical: top to bottom."
+        },
+        "dataStructuresVisualizer.autoRefreshInterval": {
+          "type": "number",
+          "default": 300,
+          "description": "Delay in milliseconds before refreshing after debug actions (Step Over, Step Into, etc.) or debug state changes",
+          "minimum": 0,
+          "maximum": 2000
         }
       }
     }
