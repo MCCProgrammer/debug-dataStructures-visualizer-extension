@@ -50,11 +50,11 @@ export function activate(context: vscode.ExtensionContext) {
 	// Map to track active visualization panels
 	const activePanels = new Map<string, vscode.WebviewPanel>();
 	
-	// Map to track language presets for each debug session
-	const sessionLanguagePresets = new Map<string, any>();
-	
 	// Map to track visualization configurations for each panel
 	const panelConfigs = new Map<string, VisualizationConfig>();
+	
+	// Cache for previously visualized variables
+	const visualizationCache = new Map<string, VisualizationConfig[]>();
 
 	// ========================================================================
 	// DEBUG ADAPTER PROTOCOL INTEGRATION
@@ -322,7 +322,7 @@ export function activate(context: vscode.ExtensionContext) {
 			try {
 				const children = await getVariableChildren(variable.variablesReference);
 				await searchVariableRecursive(children, targetName, newPath, scopeName, locations, maxDepth, depth + 1, seenLocations);
-			} catch (error) {
+						} catch (error) {
 				// Skip if we can't access children
 			}
 		}
@@ -342,59 +342,6 @@ export function activate(context: vscode.ExtensionContext) {
 		return await evaluateVariable(fullPath);
 	}
 
-	/**
-	 * Detects the programming language from the debug session
-	 */
-	function detectLanguage(debugSession: vscode.DebugSession): string {
-		// Check session type/name
-		const sessionType = debugSession.type.toLowerCase();
-		const sessionName = debugSession.name.toLowerCase();
-		
-		if (sessionType.includes('python') || sessionName.includes('python') || sessionType === 'debugpy') {
-			return 'python';
-		} else if (sessionType.includes('java') || sessionName.includes('java')) {
-			return 'java';
-		} else if (sessionType.includes('javascript') || sessionType.includes('node')) {
-			return 'javascript';
-		} else if (sessionType.includes('cpp') || sessionType.includes('c++')) {
-			return 'cpp';
-		} else if (sessionType.includes('csharp') || sessionType.includes('c#')) {
-			return 'csharp';
-		}
-		
-		// Default fallback
-		return 'unknown';
-	}
-
-	/**
-	 * Applies language-specific presets
-	 */
-	function applyLanguagePresets(language: string): void {
-		const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
-		const autoDetect = config.get<boolean>('autoDetectLanguage', true);
-		
-		if (!autoDetect) {
-			return;
-		}
-		
-		const presets = config.get<any>('languagePresets', {});
-		const languagePreset = presets[language];
-		
-		if (languagePreset) {
-			console.log(`[applyLanguagePresets] Applying presets for language: ${language}`, languagePreset);
-			
-			// Apply presets (only if not already customized by user)
-			if (languagePreset.leftChildName) {
-				config.update('leftChildName', languagePreset.leftChildName, vscode.ConfigurationTarget.Workspace);
-			}
-			if (languagePreset.rightChildName) {
-				config.update('rightChildName', languagePreset.rightChildName, vscode.ConfigurationTarget.Workspace);
-			}
-			if (languagePreset.nodeValueAttribute) {
-				config.update('nodeValueAttribute', languagePreset.nodeValueAttribute, vscode.ConfigurationTarget.Workspace);
-			}
-		}
-	}
 
 	/**
 	 * Builds a tree node from a variablesReference (DAP way)
@@ -803,7 +750,7 @@ export function activate(context: vscode.ExtensionContext) {
 			if (config.rightPath && config.rightPath.trim() !== '') {
 				const rightFullPath = buildFullPath(config.rightPath);
 				rightChild = await buildTreeNodeWithPaths(rightFullPath, config, new Set(visited), depth + 1);
-			} else {
+				} else {
 				// Try to find right child in attributes
 				const rightAttr = children.find((c: any) => c.name === 'right' || c.name === 'rightChild');
 				if (rightAttr && rightAttr.variablesReference && rightAttr.variablesReference > 0) {
@@ -843,11 +790,11 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}
 
-	// ========================================================================
+			// ========================================================================
 	// WEBVIEW CREATION AND MANAGEMENT
-	// ========================================================================
-
-	/**
+			// ========================================================================
+			
+			/**
 	 * Creates or reveals the visualization panel
 	 */
 	async function createOrRevealPanel(variableName: string): Promise<vscode.WebviewPanel> {
@@ -909,6 +856,30 @@ export function activate(context: vscode.ExtensionContext) {
 					currentVariableName = currentConfig.variablePath;
 					panelConfigs.set(panelId, currentConfig);
 					panel.title = `Data Structure Visualizer: ${currentConfig.variablePath}`;
+					
+					// Save to cache
+					const sessionId = vscode.debug.activeDebugSession?.id || 'default';
+					if (!visualizationCache.has(sessionId)) {
+						visualizationCache.set(sessionId, []);
+					}
+					const cache = visualizationCache.get(sessionId)!;
+					// Check if config already exists in cache
+					if (currentConfig) {
+						const config = currentConfig;
+						const exists = cache.some(c => 
+							c.variablePath === config.variablePath &&
+							c.visualizationType === config.visualizationType &&
+							c.treePath === config.treePath
+						);
+						if (!exists) {
+							cache.push({ ...config });
+							// Keep only last 10 configurations
+							if (cache.length > 10) {
+								cache.shift();
+							}
+						}
+					}
+					
 					updateWebviewContent(panel, currentConfig.variablePath, false, currentConfig);
 					await refreshVisualizationWithConfig(panel, currentConfig);
 					break;
@@ -922,6 +893,21 @@ export function activate(context: vscode.ExtensionContext) {
 				case 'openWizard':
 					// Open wizard to change variable/configuration
 					updateWebviewContent(panel, null, true);
+					break;
+				case 'openWizardWithConfig':
+					// Open wizard at step 3 with current config filled
+					const currentConfigForWizard = panelConfigs.get(panelId);
+					if (currentConfigForWizard) {
+						updateWebviewContent(panel, null, true, undefined, currentConfigForWizard);
+						// Send config to webview to fill form
+						panel.webview.postMessage({
+							command: 'fillWizardWithConfig',
+							config: currentConfigForWizard
+						});
+					} else {
+						// No config, just open wizard normally
+						updateWebviewContent(panel, null, true);
+					}
 					break;
 				case 'addNewVisualization':
 					// Open a new panel with wizard (doesn't close current one)
@@ -1018,7 +1004,7 @@ export function activate(context: vscode.ExtensionContext) {
 				case 'debugStepOver':
 					await vscode.commands.executeCommand('workbench.action.debug.stepOver');
 					// Auto-refresh after step over
-					setTimeout(async () => {
+				setTimeout(async () => {
 						if (currentConfig) {
 							await refreshVisualizationWithConfig(panel!, currentConfig);
 						} else {
@@ -1105,12 +1091,16 @@ export function activate(context: vscode.ExtensionContext) {
 	/**
 	 * Updates the webview HTML content
 	 */
-	function updateWebviewContent(panel: vscode.WebviewPanel, variableName: string | null, showWizard: boolean = false, visualizationConfig?: VisualizationConfig) {
+	function updateWebviewContent(panel: vscode.WebviewPanel, variableName: string | null, showWizard: boolean = false, visualizationConfig?: VisualizationConfig, wizardConfig?: VisualizationConfig) {
 		const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
 		const showDebugControls = config.get<boolean>('showDebugControls', true);
 		const treeOrientation = config.get<string>('treeOrientation', 'horizontal');
+		
+		// Get cache for current session
+		const sessionId = vscode.debug.activeDebugSession?.id || 'default';
+		const cache = visualizationCache.get(sessionId) || [];
 
-		panel.webview.html = getWebviewHtml(panel.webview, variableName, showDebugControls, treeOrientation, showWizard, visualizationConfig);
+		panel.webview.html = getWebviewHtml(panel.webview, variableName, showDebugControls, treeOrientation, showWizard, visualizationConfig, cache, wizardConfig);
 		
 		// If we have a config, send it to the webview for size display
 		if (visualizationConfig && !showWizard) {
@@ -1118,14 +1108,14 @@ export function activate(context: vscode.ExtensionContext) {
 				command: 'updateConfig',
 				config: visualizationConfig
 			});
+			}
 		}
-	}
 
-	// ========================================================================
+		// ========================================================================
 	// COMMANDS
-	// ========================================================================
-
-	/**
+		// ========================================================================
+		
+		/**
 	 * Command: Open Data Structure Visualizer
 	 */
 	const openVisualizerCommand = vscode.commands.registerCommand(
@@ -1134,8 +1124,8 @@ export function activate(context: vscode.ExtensionContext) {
 			const debugSession = vscode.debug.activeDebugSession;
 			if (!debugSession) {
 				vscode.window.showErrorMessage('No active debug session. Please start debugging first.');
-				return;
-			}
+			return;
+		}
 
 			try {
 				// Open webview immediately with wizard
@@ -1168,113 +1158,75 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	// ========================================================================
-	// LANGUAGE DETECTION AND PRESETS
-	// ========================================================================
 
-	/**
-	 * Detect language when debug session starts and apply presets
-	 */
-	const debugStartListener = vscode.debug.onDidStartDebugSession((session) => {
-		const language = detectLanguage(session);
-		console.log(`[Language Detection] Debug session started: type="${session.type}", language="${language}"`);
-		
-		// Store language for this session
-		sessionLanguagePresets.set(session.id, language);
-		
-		// Apply language presets
-		applyLanguagePresets(language);
-		
-		vscode.window.showInformationMessage(
-			`Data Structures Visualizer: Detected ${language} debug session. Presets applied.`,
-			{ modal: false }
-		);
-	});
-
-	/**
-	 * Clean up when debug session ends
-	 */
-	const debugEndListener = vscode.debug.onDidTerminateDebugSession((session) => {
-		sessionLanguagePresets.delete(session.id);
-		console.log(`[Language Detection] Debug session ended: ${session.id}`);
-	});
-
-	// ========================================================================
+		// ========================================================================
 	// DEBUG STATE LISTENERS
-	// ========================================================================
-
-	/**
+		// ========================================================================
+		
+		/**
 	 * Auto-refresh visualization when debug state changes (always enabled)
 	 */
 	const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
 	const delay = config.get<number>('autoRefreshInterval', 300);
 	
+	// Function to refresh all active visualizations
+	async function refreshAllVisualizations() {
+		const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
+		const delay = config.get<number>('autoRefreshInterval', 300);
+		
+		setTimeout(async () => {
+			// Refresh all active panels
+			for (const [panelId, panel] of activePanels.entries()) {
+				if (panel.visible) {
+					const config = panelConfigs.get(panelId);
+					if (config) {
+						await refreshVisualizationWithConfig(panel, config);
+					} else {
+						const match = panelId.match(/visualizer_(.+)/);
+						if (match && match[1] && match[1] !== 'wizard') {
+							await refreshVisualization(panel, match[1]);
+						}
+					}
+				}
+			}
+		}, delay);
+	}
+
 	// Listen for debug session custom events (breakpoint hits, step, etc.)
 	const debugCustomEventListener = vscode.debug.onDidReceiveDebugSessionCustomEvent(async (e) => {
 		// Refresh when debugger stops (breakpoint hit, step, etc.)
 		if (e.event === 'stopped' || e.event === 'breakpoint' || e.event === 'step') {
-			// Small delay to ensure debugger state is updated
-			setTimeout(async () => {
-				// Refresh all active panels
-				for (const [panelId, panel] of activePanels.entries()) {
-					if (panel.visible) {
-						const config = panelConfigs.get(panelId);
-						if (config) {
-							await refreshVisualizationWithConfig(panel, config);
-						} else {
-							const match = panelId.match(/visualizer_(.+)/);
-							if (match && match[1] && match[1] !== 'wizard') {
-								await refreshVisualization(panel, match[1]);
-							}
-						}
-					}
-				}
-			}, delay);
+			await refreshAllVisualizations();
 		}
 	});
 
 	// Listen for when debug session becomes active (might have stopped)
 	const debugSessionListener = vscode.debug.onDidChangeActiveDebugSession(async (session) => {
 		if (session) {
-			// Small delay to ensure session state is updated
-			setTimeout(async () => {
-				// Refresh all active panels when debug session changes
-				for (const [panelId, panel] of activePanels.entries()) {
-					if (panel.visible) {
-						const config = panelConfigs.get(panelId);
-						if (config) {
-							await refreshVisualizationWithConfig(panel, config);
-						} else {
-							const match = panelId.match(/visualizer_(.+)/);
-							if (match && match[1] && match[1] !== 'wizard') {
-								await refreshVisualization(panel, match[1]);
-							}
-						}
-					}
-				}
-			}, delay);
+			await refreshAllVisualizations();
 		}
 	});
 
-	context.subscriptions.push(debugCustomEventListener, debugSessionListener);
+	context.subscriptions.push(
+		debugCustomEventListener, 
+		debugSessionListener
+	);
 
-	// ========================================================================
+		// ========================================================================
 	// REGISTER COMMANDS
-	// ========================================================================
-
+		// ========================================================================
+		
 	// Register all subscriptions
 	context.subscriptions.push(
 		openVisualizerCommand, 
-		refreshCommand,
-		debugStartListener,
-		debugEndListener
+		refreshCommand
 	);
 }
 
 /**
  * Generates HTML content for the wizard
  */
-function getWizardHtml(webview: vscode.Webview): string {
+function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfig[] = [], wizardConfig?: VisualizationConfig): string {
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1470,9 +1422,9 @@ function getWizardHtml(webview: vscode.Webview): string {
 		<div class="wizard-step active" id="step1">
 			<h2>Step 1: Variable Name</h2>
 			<div class="form-group">
-				<label for="variable-name-input">Enter the variable name to visualize:</label>
+				<label for="variable-name-input">Variable Name:</label>
 				<input type="text" id="variable-name-input" placeholder="e.g., root, tree, myBST" autofocus>
-				<div class="help-text">The extension will search for this variable in all scopes (local, global, etc.)</div>
+				<div class="help-text">Enter the name of the variable you want to visualize.</div>
 			</div>
 			<div id="variable-search-results" class="variable-locations" style="display: none;"></div>
 			<div id="variable-search-error" class="error-message" style="display: none;"></div>
@@ -1480,19 +1432,39 @@ function getWizardHtml(webview: vscode.Webview): string {
 			<div class="button-group">
 				<button id="search-variable-btn">Search</button>
 			</div>
+			
+			<!-- Cache Display (only on step 1) -->
+			<div id="cache-section" style="display: ${cache.length > 0 ? 'block' : 'none'}; margin-top: 30px; padding: 15px; background-color: var(--vscode-list-hoverBackground); border-radius: 4px;">
+				<h3 style="margin-top: 0; margin-bottom: 10px;">Previously Visualized Variables</h3>
+				<div id="cache-list" style="display: flex; flex-direction: column; gap: 8px;">
+					${cache.map((c, idx) => `
+						<div class="cache-item-wrapper" data-index="${idx}" style="padding: 8px; background-color: var(--vscode-list-activeSelectionBackground); border-radius: 4px; border: 1px solid var(--vscode-list-activeSelectionBackground);">
+							<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+								<div style="flex: 1; cursor: pointer;" class="cache-item">
+									<div style="font-weight: bold; font-family: monospace;">${escapeHtml(c.variablePath)}</div>
+									<div style="font-size: 12px; color: var(--vscode-descriptionForeground);">Type: ${c.visualizationType}${c.treePath ? ` | Tree: ${escapeHtml(c.treePath)}` : ''}</div>
+								</div>
+								<button class="cache-edit-btn" data-index="${idx}" style="padding: 4px 8px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Edit</button>
+							</div>
+						</div>
+					`).join('')}
+				</div>
+				<div style="margin-top: 10px; font-size: 12px; color: var(--vscode-descriptionForeground);">Click on a cached configuration to reuse it immediately, or click "Edit" to fill the form and reuse some fields.</div>
+			</div>
 		</div>
 		
 		<!-- Step 2: Visualization Type -->
 		<div class="wizard-step" id="step2">
 			<h2>Step 2: Visualization Type</h2>
 			<div class="form-group">
-				<label for="visualization-type">Select the type of data structure:</label>
+				<label for="visualization-type">Data Structure Type:</label>
 				<select id="visualization-type">
 					<option value="binaryTree">Binary Tree</option>
 					<option value="stack" disabled>Stack (Coming Soon)</option>
 					<option value="queue" disabled>Queue (Coming Soon)</option>
 					<option value="linkedList" disabled>Linked List (Coming Soon)</option>
 				</select>
+				<div class="help-text">Select the type of data structure you want to visualize.</div>
 			</div>
 			<div class="button-group">
 				<button class="secondary" id="back-to-step1">Back</button>
@@ -1504,19 +1476,19 @@ function getWizardHtml(webview: vscode.Webview): string {
 		<div class="wizard-step" id="step3">
 			<h2>Step 3: Binary Tree Configuration</h2>
 			<div class="form-group">
-				<label for="tree-path">Tree Path (optional):</label>
+				<label for="tree-path">Tree Root Path:</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="tree-path-prefix"></span>
-						<input type="text" id="tree-path" placeholder="e.g., root (empty = use variable directly)">
+						<input type="text" id="tree-path" placeholder="e.g., root">
 					</div>
 					<button type="button" class="check-btn" data-field="tree-path">Check</button>
 				</div>
-				<div class="help-text">Path to the actual tree node. Leave empty if the variable itself is the tree root. This will be used as base path for other fields.</div>
+				<div class="help-text">Path from the variable to the actual tree root node. Leave empty if the tree root is the variable itself.</div>
 				<div id="tree-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
-				<label for="size-path">Size Path (optional):</label>
+				<label for="size-path">Size Attribute Path (optional):</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="size-path-prefix"></span>
@@ -1524,11 +1496,11 @@ function getWizardHtml(webview: vscode.Webview): string {
 					</div>
 					<button type="button" class="check-btn" data-field="size-path">Check</button>
 				</div>
-				<div class="help-text">Path to the size attribute (relative to tree path if provided). Leave empty if not tracked.</div>
+				<div class="help-text">Path to the attribute that stores the current size of the tree. Leave empty if your tree doesn't track size.</div>
 				<div id="size-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
-				<label for="left-path">Left Child Path:</label>
+				<label for="left-path">Left Child Attribute Name:</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="left-path-prefix"></span>
@@ -1536,11 +1508,11 @@ function getWizardHtml(webview: vscode.Webview): string {
 					</div>
 					<button type="button" class="check-btn" data-field="left-path">Check</button>
 				</div>
-				<div class="help-text">Path to the left child (relative to tree path if provided). Default: "left"</div>
+				<div class="help-text">Name of the attribute that points to the left child node of root. Default is "left".</div>
 				<div id="left-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
-				<label for="right-path">Right Child Path:</label>
+				<label for="right-path">Right Child Attribute Name:</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="right-path-prefix"></span>
@@ -1548,11 +1520,11 @@ function getWizardHtml(webview: vscode.Webview): string {
 					</div>
 					<button type="button" class="check-btn" data-field="right-path">Check</button>
 				</div>
-				<div class="help-text">Path to the right child (relative to tree path if provided). Default: "right"</div>
+				<div class="help-text">Name of the attribute that points to the right child node of root. Default is "right".</div>
 				<div id="right-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
-				<label for="key-path">Key Path (optional):</label>
+				<label for="key-path">Node Key Attribute (optional):</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="key-path-prefix"></span>
@@ -1560,11 +1532,11 @@ function getWizardHtml(webview: vscode.Webview): string {
 					</div>
 					<button type="button" class="check-btn" data-field="key-path">Check</button>
 				</div>
-				<div class="help-text">Path to the node key (relative to tree path if provided). Shown in node visualization.</div>
+				<div class="help-text">Path to the attribute that stores the node's key value. This value will be displayed inside the node circle in the visualization. If your implementation of tree uses EntryClass, you can get key for example wity (element or entry).getKey().value. </div>
 				<div id="key-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
-				<label for="value-path">Value Path (optional):</label>
+				<label for="value-path">Node Value Attribute (optional):</label>
 				<div style="display: flex; gap: 8px; align-items: center;">
 					<div class="path-input-group" style="flex: 1;">
 						<span class="path-prefix" id="value-path-prefix"></span>
@@ -1572,7 +1544,7 @@ function getWizardHtml(webview: vscode.Webview): string {
 					</div>
 					<button type="button" class="check-btn" data-field="value-path">Check</button>
 				</div>
-				<div class="help-text">Path to the node value (relative to tree path if provided). Shown in node details when clicked.</div>
+				<div class="help-text">Path to the attribute that stores the node's value. If key is leave empty this will be in the node circle otherwise it will be shown in the details panel when you click on a node.</div>
 				<div id="value-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="button-group">
@@ -1593,9 +1565,9 @@ function getWizardHtml(webview: vscode.Webview): string {
 			const variableName = document.getElementById('variable-name-input').value.trim();
 			if (!variableName) {
 				alert('Please enter a variable name');
-				return;
-			}
-
+					return;
+				}
+				
 			// Show loading
 			document.getElementById('variable-search-loading').style.display = 'block';
 			document.getElementById('variable-search-results').style.display = 'none';
@@ -1606,11 +1578,14 @@ function getWizardHtml(webview: vscode.Webview): string {
 		});
 
 		// Handle Enter key in variable name input
-		document.getElementById('variable-name-input').addEventListener('keypress', (e) => {
-			if (e.key === 'Enter') {
-				document.getElementById('search-variable-btn').click();
-			}
-		});
+		const variableNameInput = document.getElementById('variable-name-input');
+		if (variableNameInput) {
+			variableNameInput.addEventListener('keypress', (e) => {
+				if (e.key === 'Enter') {
+					document.getElementById('search-variable-btn').click();
+				}
+			});
+		}
 
 		// Function to update path prefixes
 		function updatePathPrefixes() {
@@ -1724,6 +1699,74 @@ function getWizardHtml(webview: vscode.Webview): string {
 			});
 		});
 
+		// Enter key handlers for path inputs (trigger check)
+		const pathInputs = ['tree-path', 'size-path', 'left-path', 'right-path', 'key-path', 'value-path'];
+		pathInputs.forEach(fieldId => {
+			const input = document.getElementById(fieldId);
+			if (input) {
+				input.addEventListener('keypress', (e) => {
+					if (e.key === 'Enter') {
+						const checkBtn = document.querySelector(\`.check-btn[data-field="\${fieldId}"]\`);
+						if (checkBtn) {
+							checkBtn.click();
+						}
+					}
+				});
+			}
+		});
+
+		// Cache item click handlers
+		const cacheData = ${JSON.stringify(cache)};
+		
+		// Click on cache item - directly start visualization
+		document.querySelectorAll('.cache-item').forEach(item => {
+			item.addEventListener('click', () => {
+				const wrapper = item.closest('.cache-item-wrapper');
+				if (!wrapper) return;
+				const index = parseInt(wrapper.getAttribute('data-index'));
+				const cachedConfig = cacheData[index];
+				if (cachedConfig) {
+					// Directly start visualization with cached config
+					vscode.postMessage({ command: 'startVisualization', config: cachedConfig });
+				}
+			});
+		});
+
+		// Edit button - fill form but don't submit
+		document.querySelectorAll('.cache-edit-btn').forEach(btn => {
+			btn.addEventListener('click', (e) => {
+				e.stopPropagation(); // Prevent triggering the cache item click
+				const index = parseInt(btn.getAttribute('data-index'));
+				const cachedConfig = cacheData[index];
+				if (cachedConfig) {
+					// Fill in the form with cached config
+					selectedVariablePath = cachedConfig.variablePath;
+					document.getElementById('variable-name-input').value = cachedConfig.variablePath.split('.').pop() || '';
+					document.getElementById('visualization-type').value = cachedConfig.visualizationType;
+					
+					// Go to step 3 and fill in paths
+					showStep(3);
+					updatePathPrefixes();
+					
+					if (cachedConfig.treePath) {
+						const treePathParts = cachedConfig.treePath.split('.');
+						const treePathSuffix = treePathParts.slice(1).join('.');
+						document.getElementById('tree-path').value = treePathSuffix;
+						updatePathPrefixes();
+					}
+					
+					document.getElementById('size-path').value = cachedConfig.sizePath || '';
+					document.getElementById('left-path').value = cachedConfig.leftPath || 'left';
+					document.getElementById('right-path').value = cachedConfig.rightPath || 'right';
+					document.getElementById('key-path').value = cachedConfig.keyPath || '';
+					document.getElementById('value-path').value = cachedConfig.valuePath || '';
+					
+					// Trigger search to select the variable
+					vscode.postMessage({ command: 'searchVariable', variableName: cachedConfig.variablePath.split('.').pop() || '' });
+				}
+			});
+		});
+
 		document.getElementById('start-visualization-btn').addEventListener('click', () => {
 			const visualizationType = document.getElementById('visualization-type').value;
 			
@@ -1763,6 +1806,32 @@ function getWizardHtml(webview: vscode.Webview): string {
 		window.addEventListener('message', event => {
 			const message = event.data;
 			switch (message.command) {
+				case 'fillWizardWithConfig':
+					// Fill wizard with provided config and go to step 3
+					const config = message.config;
+					if (config) {
+						selectedVariablePath = config.variablePath;
+						document.getElementById('variable-name-input').value = config.variablePath.split('.').pop() || '';
+						document.getElementById('visualization-type').value = config.visualizationType;
+						
+						// Go to step 3 and fill in paths
+						showStep(3);
+						updatePathPrefixes();
+						
+						if (config.treePath) {
+							const treePathParts = config.treePath.split('.');
+							const treePathSuffix = treePathParts.slice(1).join('.');
+							document.getElementById('tree-path').value = treePathSuffix;
+							updatePathPrefixes();
+						}
+						
+						document.getElementById('size-path').value = config.sizePath || '';
+						document.getElementById('left-path').value = config.leftPath || 'left';
+						document.getElementById('right-path').value = config.rightPath || 'right';
+						document.getElementById('key-path').value = config.keyPath || '';
+						document.getElementById('value-path').value = config.valuePath || '';
+					}
+					break;
 				case 'variableSearchResults':
 					document.getElementById('variable-search-loading').style.display = 'none';
 					const locations = message.locations || [];
@@ -1844,28 +1913,28 @@ function getWizardHtml(webview: vscode.Webview): string {
 /**
  * Generates HTML content for the webview
  */
-function getWebviewHtml(webview: vscode.Webview, variableName: string | null, showDebugControls: boolean, treeOrientation: string, showWizard: boolean = false, visualizationConfig?: VisualizationConfig): string {
+function getWebviewHtml(webview: vscode.Webview, variableName: string | null, showDebugControls: boolean, treeOrientation: string, showWizard: boolean = false, visualizationConfig?: VisualizationConfig, cache: VisualizationConfig[] = [], wizardConfig?: VisualizationConfig): string {
 	const isVertical = treeOrientation === 'vertical';
 	
 	// If showing wizard, return wizard HTML
 	if (showWizard) {
-		return getWizardHtml(webview);
+		return getWizardHtml(webview, cache, wizardConfig);
 	}
 	
 	return `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Data Structure Visualizer</title>
 	<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-	<style>
-		body {
+		<style>
+			body {
 			margin: 0;
 			padding: 20px;
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-			background-color: var(--vscode-editor-background);
-			color: var(--vscode-editor-foreground);
+				background-color: var(--vscode-editor-background);
+				color: var(--vscode-editor-foreground);
 			display: flex;
 			flex-direction: column;
 			height: 100vh;
@@ -1890,7 +1959,7 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 			align-items: center;
 		}
 		.variable-input-group input {
-			padding: 6px 12px;
+				padding: 6px 12px;
 			background-color: var(--vscode-input-background);
 			color: var(--vscode-input-foreground);
 			border: 1px solid var(--vscode-input-border);
@@ -1913,16 +1982,16 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 			margin-bottom: 20px;
 		}
 		button {
-			padding: 8px 16px;
-			background-color: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-			border: none;
+			padding: 4px 12px;
+				background-color: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				border: none;
 			border-radius: 4px;
-			cursor: pointer;
+				cursor: pointer;
 			font-size: 14px;
-		}
-		button:hover {
-			background-color: var(--vscode-button-hoverBackground);
+			}
+			button:hover {
+				background-color: var(--vscode-button-hoverBackground);
 		}
 		button:disabled {
 			opacity: 0.5;
@@ -2028,13 +2097,13 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 			padding: 20px;
 			text-align: center;
 		}
-	</style>
-</head>
-<body>
+		</style>
+	</head>
+	<body>
 	<div class="header">
 		<div class="title">Data Structure Visualizer: <code>${variableName ? escapeHtml(variableName) : ''}</code></div>
 		<div class="variable-input-group">
-			<button id="change-variable-btn">Change Variable</button>
+			<button id="change-variable-btn">Back</button>
 			<button id="add-visualization-btn">Add Another Visualization</button>
 		</div>
 	</div>
@@ -2046,7 +2115,10 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 			<button id="step-into">→ Step Into</button>
 			<button id="step-out">↑ Step Out</button>
 			<button id="continue">▶ Continue</button>
-			<span id="size-display" style="display: none; margin-left: 10px; padding: 8px 12px; background-color: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 4px; font-size: 13px;"></span>
+			<div id="size-container" style="display: none; margin-left: 15px; align-items: center; gap: 8px;">
+				<span id="size-display" style="padding: 4px 12px; background: linear-gradient(135deg, var(--vscode-button-background) 0%, var(--vscode-button-hoverBackground) 100%); color: var(--vscode-button-foreground); border-radius: 4px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.2); height: fit-content; display: inline-flex; align-items: center;"></span>
+				<button id="refresh-visualization-btn" title="Refresh Visualization" style="padding: 4px 12px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); border-radius: 4px; cursor: pointer; font-size: 13px;">refresh</button>
+			</div>
 		</div>
 	</div>
 	` : ''}
@@ -2057,7 +2129,10 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 		<button id="step-into">→ Step Into</button>
 		<button id="step-out">↑ Step Out</button>
 		<button id="continue">▶ Continue</button>
-		<span id="size-display" style="display: none; margin-left: 10px; padding: 8px 12px; background-color: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 4px; font-size: 13px;"></span>
+		<div id="size-container" style="display: none; margin-top: 15px; align-items: center; gap: 8px;">
+			<span id="size-display" style="padding: 4px 12px; background: linear-gradient(135deg, var(--vscode-button-background) 0%, var(--vscode-button-hoverBackground) 100%); color: var(--vscode-button-foreground); border-radius: 4px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.2); height: fit-content; display: inline-flex; align-items: center;"></span>
+			<button id="refresh-visualization-btn" title="Refresh Visualization" style="padding: 4px 12px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); border-radius: 4px; cursor: pointer; font-size: 13px;">refresh</button>
+		</div>
 	</div>
 	` : ''}
 	
@@ -2067,8 +2142,8 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 		<div id="node-info-content"></div>
 	</div>
 
-	<script>
-		const vscode = acquireVsCodeApi();
+		<script>
+			const vscode = acquireVsCodeApi();
 		let treeData = null;
 		let svg = null;
 		let g = null;
@@ -2080,11 +2155,20 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 		document.addEventListener('DOMContentLoaded', () => {
 			nodeInfo = document.getElementById('node-info');
 
-			// Change variable button handler - opens wizard
+			// Back button handler - opens wizard at step 3 with current config
 			const changeVariableBtn = document.getElementById('change-variable-btn');
 			if (changeVariableBtn) {
 				changeVariableBtn.addEventListener('click', () => {
-					vscode.postMessage({ command: 'openWizard' });
+					// Send current config to open wizard at step 3
+					vscode.postMessage({ command: 'openWizardWithConfig' });
+				});
+			}
+
+			// Refresh visualization button handler
+			const refreshBtn = document.getElementById('refresh-visualization-btn');
+			if (refreshBtn) {
+				refreshBtn.addEventListener('click', () => {
+					vscode.postMessage({ command: 'refresh' });
 				});
 			}
 
@@ -2138,10 +2222,13 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 					}
 					break;
 				case 'updateSizeValue':
+					const sizeContainer = document.getElementById('size-container');
 					const sizeDisplay = document.getElementById('size-display');
 					if (sizeDisplay) {
 						sizeDisplay.textContent = 'CurrentSize: ' + message.size;
-						sizeDisplay.style.display = 'inline-block';
+					}
+					if (sizeContainer) {
+						sizeContainer.style.display = 'flex';
 					}
 					break;
 				case 'updateVariableName':
@@ -2151,11 +2238,12 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 		});
 
 		async function updateSizeDisplay(config) {
+			const sizeContainer = document.getElementById('size-container');
 			const sizeDisplay = document.getElementById('size-display');
-			if (!sizeDisplay) return;
+			if (!sizeDisplay || !sizeContainer) return;
 
 			if (!config.sizePath || config.sizePath.trim() === '') {
-				sizeDisplay.style.display = 'none';
+				sizeContainer.style.display = 'none';
 				return;
 			}
 
@@ -2363,8 +2451,8 @@ function getWebviewHtml(webview: vscode.Webview, variableName: string | null, sh
 				renderTree();
 			}
 		});
-	</script>
-</body>
+		</script>
+	</body>
 </html>`;
 }
 
