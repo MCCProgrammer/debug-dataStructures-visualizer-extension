@@ -1,7 +1,7 @@
 {
   "name": "debug-dataStructures-visualizer-extension",
   "displayName": "Debug Data Structures Visualizer",
-  "description": "Visualize binary trees and other data structures during debugging with interactive D3.js visualization. Supports Python and Java debugging.",
+  "description": "Visualize binary trees during debugging with interactive D3.js visualization. Supports Python and Java debugging. Doubly linked list support coming soon.",
   "version": "1.0.0",
   "publisher": "MCCProgrammer",
   "icon": "icon.png",
@@ -27,7 +27,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MCCProgrammer/github-style-markdown-preview"
+    "url": "https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension"
   },
   "activationEvents": [],
   "browser": "./dist/web/extension.js",

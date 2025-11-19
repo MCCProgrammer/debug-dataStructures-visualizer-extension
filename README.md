@@ -8,10 +8,14 @@ A Visual Studio Code extension that provides an interactive visualization of bin
 - 🔍 **Debug Integration**: Seamlessly integrates with VS Code's Debug Adapter Protocol (DAP)
 - 🎯 **Variable Inspection**: Simply provide the variable name (e.g., `root`, `tree.root`) to visualize
 - 🖱️ **Interactive Nodes**: Click on any node to see its attributes and properties
+- 🖱️ **Draggable Nodes**: Drag nodes to reposition them for better visualization
 - 🎮 **Debug Controls**: Control debug execution directly from the visualization panel
 - 🔄 **Auto-Refresh**: Automatically updates when debug state changes
 - 🐍 **Python & Java Support**: Works with Python and Java debuggers
-- ⚙️ **Configurable**: Customize attribute names, depth limits, and more
+- ⚙️ **Configurable**: Customize paths, depth limits, orientation, and more
+- 📋 **Configuration Wizard**: Step-by-step wizard for easy setup
+- 💾 **Configuration Caching**: Previously configured visualizations are cached for quick reuse
+- 🔗 **Coming Soon**: Doubly Linked List visualization support
 
 ## 🚀 Installation
 
@@ -91,66 +95,6 @@ System.out.println(root.val);  // Breakpoint here
 
 The extension supports the following settings:
 
-### `dataStructuresVisualizer.autoRefresh`
-
-Automatically refresh visualization when debug state changes.
-
-**Default**: `true`
-
-```json
-{
-  "dataStructuresVisualizer.autoRefresh": true
-}
-```
-
-### `dataStructuresVisualizer.defaultAttributes`
-
-Default attributes to display for tree nodes.
-
-**Default**: `["value", "key", "data"]`
-
-```json
-{
-  "dataStructuresVisualizer.defaultAttributes": ["value", "key", "data", "height"]
-}
-```
-
-### `dataStructuresVisualizer.leftChildName`
-
-Name of the left child attribute in binary trees.
-
-**Default**: `"left"`
-
-```json
-{
-  "dataStructuresVisualizer.leftChildName": "left"
-}
-```
-
-### `dataStructuresVisualizer.rightChildName`
-
-Name of the right child attribute in binary trees.
-
-**Default**: `"right"`
-
-```json
-{
-  "dataStructuresVisualizer.rightChildName": "right"
-}
-```
-
-### `dataStructuresVisualizer.nodeValueAttribute`
-
-Name of the attribute to display as node value (fallback: key, data, val).
-
-**Default**: `"value"`
-
-```json
-{
-  "dataStructuresVisualizer.nodeValueAttribute": "val"
-}
-```
-
 ### `dataStructuresVisualizer.maxDepth`
 
 Maximum depth to traverse when building tree structure.
@@ -172,6 +116,30 @@ Show debug control buttons (Step Over, Step Into, etc.) in the visualization.
 ```json
 {
   "dataStructuresVisualizer.showDebugControls": true
+}
+```
+
+### `dataStructuresVisualizer.treeOrientation`
+
+Orientation of the tree visualization. Horizontal: left to right. Vertical: top to bottom.
+
+**Default**: `"horizontal"`
+
+```json
+{
+  "dataStructuresVisualizer.treeOrientation": "vertical"
+}
+```
+
+### `dataStructuresVisualizer.autoRefreshInterval`
+
+Delay in milliseconds before refreshing after debug actions (Step Over, Step Into, etc.) or debug state changes.
+
+**Default**: `300`
+
+```json
+{
+  "dataStructuresVisualizer.autoRefreshInterval": 500
 }
 ```
 
@@ -207,10 +175,10 @@ Make sure you have started debugging before opening the visualizer. The extensio
 
 ## 📝 Future Features
 
+- **Doubly Linked List**: Support for visualizing doubly linked lists (coming soon)
 - Support for AVL trees with balance factor visualization
 - Support for Red-Black trees with color visualization
 - Support for graphs
-- Support for linked lists
 - Support for tries
 - Export tree as image (PNG/SVG)
 - Export tree structure as JSON

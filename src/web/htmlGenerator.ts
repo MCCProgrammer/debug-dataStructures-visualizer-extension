@@ -243,9 +243,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 				<label for="visualization-type">Data Structure Type:</label>
 				<select id="visualization-type">
 					<option value="binaryTree">Binary Tree</option>
-					<option value="stack" disabled>Stack (Coming Soon)</option>
-					<option value="queue" disabled>Queue (Coming Soon)</option>
-					<option value="linkedList" disabled>Linked List (Coming Soon)</option>
+					<option value="doublyLinkedList" disabled>Doubly Linked List (Coming Soon)</option>
 				</select>
 				<div class="help-text">Select the type of data structure you want to visualize.</div>
 			</div>
