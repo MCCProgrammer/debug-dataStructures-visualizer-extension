@@ -4,7 +4,7 @@ All notable changes to the "Debug Data Structures Visualizer" extension will be 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [1.0.0] - 2025-01-XX
+## [1.0.0] - 2026-03-18
 
 ### Added
 - 🌳 **Binary Tree Visualization**: Interactive D3.js visualization of binary trees during debugging
