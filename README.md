@@ -5,11 +5,14 @@ A Visual Studio Code extension that provides an interactive visualization of bin
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/MCCProgrammer.debug-dataStructures-visualizer-extension?label=VS%20Code%20Marketplace&logo=visualstudiocode&style=flat-square&color=1f2328)](https://marketplace.visualstudio.com/items?itemName=MCCProgrammer.debug-dataStructures-visualizer-extension)
 [![Open VSX](https://img.shields.io/open-vsx/v/MCCProgrammer/debug-dataStructures-visualizer-extension?label=Open%20VSX&logo=eclipseide&style=flat-square&color=1f2328)](https://open-vsx.org/extension/MCCProgrammer/debug-dataStructures-visualizer-extension)
 
+![Picking a detected AVL tree and stepping through its insertions and rotations](images/demo.gif)
+
 ## ✨ Features
 
 - 🌳 **Binary Tree Visualization**: Interactive D3.js visualization of binary trees during debugging
 - 🔍 **Debug Integration**: Seamlessly integrates with VS Code's Debug Adapter Protocol (DAP)
-- 🎯 **Variable Inspection**: Simply provide the variable name (e.g., `root`, `tree.root`) to visualize
+- 🔎 **Automatic Tree Detection**: Lists the trees in the current frame (`root`, `bst.root`, `self.root`, `this.root`...) so you can open one with a click
+- 🎯 **Variable Inspection**: Or provide the variable name yourself (e.g., `root`, `tree.root`)
 - 🖱️ **Interactive Nodes**: Click on any node to see its attributes and properties
 - 🖱️ **Draggable Nodes**: Drag nodes to reposition them for better visualization
 - 🎮 **Debug Controls**: Control debug execution directly from the visualization panel
@@ -40,8 +43,18 @@ Or from inside the editor:
 3. **Open Visualizer**: 
    - Press `Ctrl+Alt+V` (Windows/Linux) or `Cmd+Opt+V` (Mac) when debugger is stopped
    - Or use Command Palette (`F1`) and search for "Open Data Structure Visualizer"
-4. **Enter Variable Name**: When prompted, enter the variable name containing your tree root (e.g., `root`, `tree.root`, `myBST`)
+4. **Pick a Tree**: The visualizer lists the trees it found in the current frame. Click one to draw it, or click **Edit** to adjust its paths first. If your tree isn't listed, enter the variable name instead (e.g., `root`, `tree.root`, `myBST`)
 5. **Visualize**: The tree will be displayed in an interactive panel
+
+Detection recognizes nodes with `left`/`right`, `leftChild`/`rightChild`, `leftNode`/`rightNode` or `lchild`/`rchild` children, a key or value such as `key`, `val`, `value`, `data` or `element` (including `element.key` / `element.value` entries), and a size field such as `size` or `currentSize` on the object holding the tree.
+
+Textbook trees work too, like this Java BST whose nodes hold an `element` entry with a key and a value, linked with `leftChild` / `rightChild`:
+
+![Watching a Java binary search tree with key/value entries grow while stepping over each insert](images/bst.gif)
+
+You can also enter the variable name and set each path in the wizard, using **Check** to see the value it points to:
+
+![Entering a variable name in the wizard, checking a path, then dragging a node and opening its details](images/manual.gif)
 
 ### Interactive Features
 
@@ -170,6 +183,7 @@ Make sure you have started debugging before opening the visualizer. The extensio
 
 ### Tree Not Displaying
 
+- If the tree isn't in the detected list, enter its variable name in the wizard
 - Verify the variable name is correct
 - Check that the variable is in scope at the current breakpoint
 - Ensure the variable has `left` and `right` attributes (or configured attribute names)
@@ -201,7 +215,7 @@ This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
-- [D3.js](https://d3js.org/) for the powerful visualization library
+- [D3.js](https://d3js.org/) for the powerful visualization library (bundled with the extension, so the visualizer works offline)
 - VS Code Debug Adapter Protocol for debug integration
 
 ---

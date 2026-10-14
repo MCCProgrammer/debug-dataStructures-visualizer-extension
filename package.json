@@ -2,7 +2,7 @@
   "name": "debug-dataStructures-visualizer-extension",
   "displayName": "Debug Data Structures Visualizer",
   "description": "Visualize binary trees during debugging with interactive D3.js visualization. Supports Python and Java debugging. Doubly linked list support coming soon.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "MCCProgrammer",
   "icon": "icon.png",
   "engines": {
@@ -93,7 +93,10 @@
         },
         "dataStructuresVisualizer.treeOrientation": {
           "type": "string",
-          "enum": ["horizontal", "vertical"],
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
           "default": "horizontal",
           "description": "Orientation of the tree visualization. Horizontal: left to right. Vertical: top to bottom."
         },
@@ -129,12 +132,12 @@
     "@typescript-eslint/parser": "^8.45.0",
     "@vscode/test-web": "^0.0.74",
     "assert": "^2.1.0",
+    "d3": "7.9.0",
     "esbuild": "^0.25.10",
     "eslint": "^9.36.0",
     "glob": "^11.0.3",
     "mocha": "^11.7.4",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {}
+  }
 }

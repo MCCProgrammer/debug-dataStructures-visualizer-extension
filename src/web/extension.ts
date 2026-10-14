@@ -4,10 +4,13 @@
 
 import * as vscode from 'vscode';
 import { VisualizationConfig } from './types';
-import { createOrRevealPanel, updateWebviewContent, refreshVisualization, refreshAllVisualizations, WebviewManagerDependencies } from './webviewManager';
+import { createOrRevealPanel, updateWebviewContent, refreshVisualization, refreshVisualizationWithConfig, refreshAllVisualizations, WebviewManagerDependencies } from './webviewManager';
+import { initRatingPrompt } from './ratingPrompt';
+import { rememberStoppedThread } from './debugAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Data Structures Visualizer extension is now active!');
+	initRatingPrompt(context);
 
 	// Map to track active visualization panels
 		const activePanels = new Map<string, vscode.WebviewPanel>();
@@ -20,6 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Dependencies for webview manager
 	const deps: WebviewManagerDependencies = {
+		context,
 		activePanels,
 		panelConfigs,
 		visualizationCache
@@ -57,15 +61,22 @@ export function activate(context: vscode.ExtensionContext) {
 	const refreshCommand = vscode.commands.registerCommand(
 		'dataStructuresVisualizer.refreshVisualization',
 		async () => {
-			const activePanel = Array.from(activePanels.values()).find(p => p.visible);
-			if (!activePanel) {
+			const active = Array.from(activePanels.entries()).find(([, p]) => p.active) ||
+				Array.from(activePanels.entries()).find(([, p]) => p.visible);
+			if (!active) {
 				vscode.window.showInformationMessage('No active visualization panel found.');
-						return;
-					}
+				return;
+			}
 
-			// Extract variable name from panel title
-			const title = activePanel.title;
-			const match = title.match(/Data Structure Visualizer: (.+)/);
+			const [panelId, activePanel] = active;
+			const panelConfig = panelConfigs.get(panelId);
+			if (panelConfig) {
+				await refreshVisualizationWithConfig(activePanel, panelConfig);
+				return;
+			}
+
+			// Panels without a configuration: extract variable name from panel title
+			const match = activePanel.title.match(/Data Structure Visualizer: (.+)/);
 			if (match && match[1]) {
 				await refreshVisualization(activePanel, match[1]);
 			}
@@ -79,15 +90,17 @@ export function activate(context: vscode.ExtensionContext) {
 		/**
 	 * Auto-refresh visualization when debug state changes (always enabled)
 	 */
-	const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
-	const delay = config.get<number>('autoRefreshInterval', 300);
-	
-	// Listen for debug session custom events (breakpoint hits, step, etc.)
-	const debugCustomEventListener = vscode.debug.onDidReceiveDebugSessionCustomEvent(async (e) => {
-		// Refresh when debugger stops (breakpoint hit, step, etc.)
-		if (e.event === 'stopped' || e.event === 'breakpoint' || e.event === 'step') {
-			await refreshAllVisualizations(deps);
-		}
+	// "stopped" is a standard DAP event, so it never reaches onDidReceiveDebugSessionCustomEvent:
+	// a tracker sees it whether the step came from the panel, the debug toolbar or a shortcut
+	const debugStoppedTracker = vscode.debug.registerDebugAdapterTrackerFactory('*', {
+		createDebugAdapterTracker: (session) => ({
+			onDidSendMessage: (message: any) => {
+				if (message.type === 'event' && message.event === 'stopped') {
+					rememberStoppedThread(session.id, message.body?.threadId);
+					void refreshAllVisualizations(deps);
+				}
+			}
+		})
 	});
 
 	// Listen for when debug session becomes active (might have stopped)
@@ -105,7 +118,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		openVisualizerCommand, 
 		refreshCommand,
-		debugCustomEventListener, 
+		debugStoppedTracker,
 		debugSessionListener
 	);
 }

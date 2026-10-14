@@ -1,6 +1,7 @@
 const esbuild = require('esbuild');
 const glob = require('glob');
 const path = require('path');
+const fs = require('fs');
 const polyfill = require('@esbuild-plugins/node-globals-polyfill');
 
 const production = process.argv.includes('--production');
@@ -57,7 +58,19 @@ const testBundlePlugin = {
 	}
 };
 
+/**
+ * Copies D3 into dist/media so the webview loads it from the extension instead of a CDN.
+ */
+function copyWebviewAssets() {
+	const mediaDir = path.join(__dirname, 'dist/media');
+	fs.mkdirSync(mediaDir, { recursive: true });
+	const d3Dir = path.join(__dirname, 'node_modules/d3');
+	fs.copyFileSync(path.join(d3Dir, 'dist/d3.min.js'), path.join(mediaDir, 'd3.min.js'));
+	fs.copyFileSync(path.join(d3Dir, 'LICENSE'), path.join(mediaDir, 'd3-LICENSE'));
+}
+
 async function main() {
+	copyWebviewAssets();
 	const ctx = await esbuild.context({
 		entryPoints: [
 			'src/web/extension.ts',

@@ -5,6 +5,15 @@
 import * as vscode from 'vscode';
 import { VariableLocation } from './types';
 
+// Thread that reported the last "stopped" event, per debug session
+const stoppedThreads = new Map<string, number>();
+
+export function rememberStoppedThread(sessionId: string, threadId: number | undefined) {
+	if (threadId !== undefined) {
+		stoppedThreads.set(sessionId, threadId);
+	}
+}
+
 /**
  * Gets the current frame ID from the active debug session
  */
@@ -12,6 +21,13 @@ export async function getCurrentFrameId(): Promise<number | undefined> {
 	const debugSession = vscode.debug.activeDebugSession;
 	if (!debugSession) {
 		return undefined;
+	}
+
+	// Frame or thread selected in the Call Stack view (VS Code 1.90+)
+	const stackItem = (vscode.debug as any).activeStackItem;
+	const selected = stackItem && stackItem.session && stackItem.session.id === debugSession.id ? stackItem : undefined;
+	if (selected && selected.frameId !== undefined) {
+		return selected.frameId;
 	}
 
 	try {
@@ -25,8 +41,10 @@ export async function getCurrentFrameId(): Promise<number | undefined> {
 			threads = threadsResponse.body.threads;
 		}
 
-		// Use the first thread (usually the main thread)
-		const threadId = threads && threads.length > 0 ? threads[0].id : 1;
+		// Selected thread, else the one that stopped, else the first one
+		const threadId = selected?.threadId
+			?? stoppedThreads.get(debugSession.id)
+			?? (threads && threads.length > 0 ? threads[0].id : 1);
 
 		// Get stack trace to find the current frame
 		const response = await debugSession.customRequest('stackTrace', {
@@ -143,13 +161,13 @@ export async function getVariableChildren(variablesReference: number): Promise<a
 		});
 		
 		// Handle different response formats
-		if (response && response.variables) {
-			return response.variables;
-		} else if (response && response.body && response.body.variables) {
-			return response.body.variables;
-		} else {
-			return [];
+		const variables = response?.variables || response?.body?.variables || [];
+
+		// Java (java-debug) wraps an object's fields in a single unnamed child when its class has toString()
+		if (variables.length === 1 && variables[0].name === '' && variables[0].variablesReference > 0) {
+			return getVariableChildren(variables[0].variablesReference);
 		}
+		return variables;
 	} catch (error: any) {
 		throw new Error(`Failed to get variable children: ${error.message || error}`);
 	}

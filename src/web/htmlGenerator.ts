@@ -4,16 +4,27 @@
 
 import * as vscode from 'vscode';
 import { VisualizationConfig } from './types';
-import { escapeHtml } from './utils';
+import { escapeHtml, getNonce, toScriptJson } from './utils';
+
+/**
+ * Content Security Policy: scripts only with the page nonce, no network access
+ */
+function getCspMeta(webview: vscode.Webview, nonce: string): string {
+	return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';">`;
+}
 
 /**
  * Generates HTML content for the wizard
  */
 export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfig[] = [], wizardConfig?: VisualizationConfig): string {
+	const nonce = getNonce();
+	// Opened from "Back" with a config: the wizard jumps to step 3, no need to scan the frame
+	const autoDetect = !wizardConfig;
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
+	${getCspMeta(webview, nonce)}
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Data Structure Visualizer - Setup Wizard</title>
 	<style>
@@ -137,6 +148,21 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			font-size: 12px;
 			color: var(--vscode-descriptionForeground);
 		}
+		.detected-tree {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 10px;
+		}
+		.detected-tree .info {
+			flex: 1;
+			min-width: 0;
+		}
+		.detected-tree button {
+			padding: 4px 8px;
+			font-size: 12px;
+			white-space: nowrap;
+		}
 		.error-message {
 			color: var(--vscode-errorForeground);
 			margin-top: 10px;
@@ -203,9 +229,15 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 		
 		<!-- Step 1: Variable Name -->
 		<div class="wizard-step active" id="step1">
-			<h2>Step 1: Variable Name</h2>
+			<h2>Step 1: Choose a Tree</h2>
+			<div id="detected-section" style="display: ${autoDetect ? 'block' : 'none'}; margin-bottom: 20px;">
+				<label style="display: block; margin-bottom: 5px; font-weight: 500;">Trees found in the current frame:</label>
+				<div id="detected-loading" class="loading">Looking for trees...</div>
+				<div id="detected-list" class="variable-locations"></div>
+				<div id="detected-empty" class="help-text" style="display: none;"></div>
+			</div>
 			<div class="form-group">
-				<label for="variable-name-input">Variable Name:</label>
+				<label for="variable-name-input">${autoDetect ? 'Or enter a variable name:' : 'Variable Name:'}</label>
 				<input type="text" id="variable-name-input" placeholder="e.g., root, tree, myBST" autofocus>
 				<div class="help-text">Enter the name of the variable you want to visualize.</div>
 			</div>
@@ -313,7 +345,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 					</div>
 					<button type="button" class="check-btn" data-field="key-path">Check</button>
 				</div>
-				<div class="help-text">Path to the attribute that stores the node's key value. This value will be displayed inside the node circle in the visualization. If your implementation of tree uses EntryClass, you can get key for example wity (element or entry).getKey().value. </div>
+				<div class="help-text">Path to the attribute that stores the node's key value. This value will be displayed inside the node circle in the visualization. If your implementation of tree uses EntryClass, you can get the key with, for example, element.key or entry.key. </div>
 				<div id="key-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="form-group">
@@ -325,7 +357,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 					</div>
 					<button type="button" class="check-btn" data-field="value-path">Check</button>
 				</div>
-				<div class="help-text">Path to the attribute that stores the node's value. If key is leave empty this will be in the node circle otherwise it will be shown in the details panel when you click on a node.</div>
+				<div class="help-text">Path to the attribute that stores the node's value. If the key is left empty, this value is shown in the node circle; otherwise it is shown in the details panel when you click a node.</div>
 				<div id="value-path-result" class="field-result" style="display: none; margin-top: 5px;"></div>
 			</div>
 			<div class="button-group">
@@ -335,7 +367,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 		</div>
 	</div>
 
-	<script>
+	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		let currentStep = 1;
 		let selectedVariablePath = '';
@@ -496,8 +528,29 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			}
 		});
 
+		// Fills step 3 with a configuration and shows it
+		function fillForm(config) {
+			selectedVariablePath = config.variablePath;
+			document.getElementById('variable-name-input').value = config.variablePath.split('.').pop() || '';
+			document.getElementById('visualization-type').value = config.visualizationType;
+
+			const prefix = config.variablePath + '.';
+			const treePathSuffix = config.treePath && config.treePath.startsWith(prefix)
+				? config.treePath.substring(prefix.length)
+				: (config.treePath || '');
+			document.getElementById('tree-path').value = treePathSuffix;
+			document.getElementById('size-path').value = config.sizePath || '';
+			document.getElementById('left-path').value = config.leftPath || 'left';
+			document.getElementById('right-path').value = config.rightPath || 'right';
+			document.getElementById('key-path').value = config.keyPath || '';
+			document.getElementById('value-path').value = config.valuePath || '';
+
+			showStep(3);
+			updatePathPrefixes();
+		}
+
 		// Cache item click handlers
-		const cacheData = ${JSON.stringify(cache)};
+		const cacheData = ${toScriptJson(cache)};
 		
 		// Click on cache item - directly start visualization
 		document.querySelectorAll('.cache-item').forEach(item => {
@@ -520,30 +573,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 				const index = parseInt(btn.getAttribute('data-index'));
 				const cachedConfig = cacheData[index];
 				if (cachedConfig) {
-					// Fill in the form with cached config
-					selectedVariablePath = cachedConfig.variablePath;
-					document.getElementById('variable-name-input').value = cachedConfig.variablePath.split('.').pop() || '';
-					document.getElementById('visualization-type').value = cachedConfig.visualizationType;
-					
-					// Go to step 3 and fill in paths
-					showStep(3);
-					updatePathPrefixes();
-					
-					if (cachedConfig.treePath) {
-						const treePathParts = cachedConfig.treePath.split('.');
-						const treePathSuffix = treePathParts.slice(1).join('.');
-						document.getElementById('tree-path').value = treePathSuffix;
-						updatePathPrefixes();
-					}
-					
-					document.getElementById('size-path').value = cachedConfig.sizePath || '';
-					document.getElementById('left-path').value = cachedConfig.leftPath || 'left';
-					document.getElementById('right-path').value = cachedConfig.rightPath || 'right';
-					document.getElementById('key-path').value = cachedConfig.keyPath || '';
-					document.getElementById('value-path').value = cachedConfig.valuePath || '';
-					
-					// Trigger search to select the variable
-					vscode.postMessage({ command: 'searchVariable', variableName: cachedConfig.variablePath.split('.').pop() || '' });
+					fillForm(cachedConfig);
 				}
 			});
 		});
@@ -589,29 +619,12 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			switch (message.command) {
 				case 'fillWizardWithConfig':
 					// Fill wizard with provided config and go to step 3
-					const config = message.config;
-					if (config) {
-						selectedVariablePath = config.variablePath;
-						document.getElementById('variable-name-input').value = config.variablePath.split('.').pop() || '';
-						document.getElementById('visualization-type').value = config.visualizationType;
-						
-						// Go to step 3 and fill in paths
-						showStep(3);
-						updatePathPrefixes();
-						
-						if (config.treePath) {
-							const treePathParts = config.treePath.split('.');
-							const treePathSuffix = treePathParts.slice(1).join('.');
-							document.getElementById('tree-path').value = treePathSuffix;
-							updatePathPrefixes();
-						}
-						
-						document.getElementById('size-path').value = config.sizePath || '';
-						document.getElementById('left-path').value = config.leftPath || 'left';
-						document.getElementById('right-path').value = config.rightPath || 'right';
-						document.getElementById('key-path').value = config.keyPath || '';
-						document.getElementById('value-path').value = config.valuePath || '';
+					if (message.config) {
+						fillForm(message.config);
 					}
+					break;
+				case 'detectedTrees':
+					renderDetectedTrees(message.trees || [], message.error);
 					break;
 				case 'variableSearchResults':
 					document.getElementById('variable-search-loading').style.display = 'none';
@@ -681,6 +694,52 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			}
 		});
 
+		function renderDetectedTrees(trees, error) {
+			document.getElementById('detected-loading').style.display = 'none';
+			const list = document.getElementById('detected-list');
+			const empty = document.getElementById('detected-empty');
+			list.innerHTML = '';
+
+			if (trees.length === 0) {
+				empty.textContent = error
+					? 'Could not scan the current frame (' + error + '). Enter the variable name below.'
+					: 'No tree found automatically. Enter the variable name below.';
+				empty.style.display = 'block';
+				return;
+			}
+
+			trees.forEach(tree => {
+				const c = tree.config;
+				const details = tree.empty ? ['empty for now'] : ['children: ' + c.leftPath + ' / ' + c.rightPath];
+				if (c.keyPath) details.push('key: ' + c.keyPath);
+				if (c.valuePath) details.push('value: ' + c.valuePath);
+				if (c.sizePath) details.push('size: ' + c.sizePath);
+
+				const item = document.createElement('div');
+				item.className = 'variable-location detected-tree';
+				item.title = 'Visualize ' + tree.path;
+				item.innerHTML = \`
+					<div class="info">
+						<div class="path">\${escapeHtml(tree.path)}</div>
+						<div class="scope">\${escapeHtml(details.join(' · '))} · \${escapeHtml(tree.scope)}</div>
+					</div>
+					<button class="secondary" title="Adjust the paths before visualizing">Edit</button>
+				\`;
+				item.addEventListener('click', () => {
+					vscode.postMessage({ command: 'startVisualization', config: c });
+				});
+				item.querySelector('button').addEventListener('click', (e) => {
+					e.stopPropagation();
+					fillForm(c);
+				});
+				list.appendChild(item);
+			});
+		}
+
+		if (${autoDetect}) {
+			vscode.postMessage({ command: 'detectTrees' });
+		}
+
 		function escapeHtml(text) {
 			const div = document.createElement('div');
 			div.textContent = text;
@@ -694,7 +753,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 /**
  * Generates HTML content for the webview
  */
-export function getWebviewHtml(webview: vscode.Webview, variableName: string | null, showDebugControls: boolean, treeOrientation: string, showWizard: boolean = false, visualizationConfig?: VisualizationConfig, cache: VisualizationConfig[] = [], wizardConfig?: VisualizationConfig): string {
+export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, variableName: string | null, showDebugControls: boolean, treeOrientation: string, showWizard: boolean = false, visualizationConfig?: VisualizationConfig, cache: VisualizationConfig[] = [], wizardConfig?: VisualizationConfig): string {
 	const isVertical = treeOrientation === 'vertical';
 	
 	// If showing wizard, return wizard HTML
@@ -702,13 +761,17 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 		return getWizardHtml(webview, cache, wizardConfig);
 	}
 	
+	const nonce = getNonce();
+	const d3Uri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'media', 'd3.min.js'));
+	
 	return `<!DOCTYPE html>
 	<html lang="en">
 	<head>
 		<meta charset="UTF-8">
+		${getCspMeta(webview, nonce)}
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Data Structure Visualizer</title>
-	<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+	<script nonce="${nonce}" src="${d3Uri}"></script>
 		<style>
 			body {
 			margin: 0;
@@ -860,6 +923,9 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 			background-color: var(--vscode-editor-background);
 			min-height: 0;
 		}
+		#tree-container svg {
+			display: block;
+		}
 		.node {
 			cursor: pointer;
 		}
@@ -884,7 +950,8 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 		}
 		.link {
 			fill: none;
-			stroke: var(--vscode-panel-border);
+			stroke: var(--vscode-descriptionForeground);
+			stroke-opacity: 0.6;
 			stroke-width: 2px;
 		}
 		.node-info {
@@ -969,7 +1036,7 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 		<div id="node-info-content"></div>
 	</div>
 
-		<script>
+		<script nonce="${nonce}">
 			const vscode = acquireVsCodeApi();
 		let treeData = null;
 		let svg = null;
@@ -1113,16 +1180,13 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 			const height = container.clientHeight || 600;
 			
 			svg = d3.select(container)
-				.append('svg')
-				.attr('width', width)
-				.attr('height', height);
+				.append('svg');
 
-			g = svg.append('g')
-				.attr('transform', 'translate(40, 40)');
+			g = svg.append('g');
 
-			// Create tree layout with orientation
+			// Fixed spacing between nodes (siblings, levels) so circles never overlap
 			const treeLayout = d3.tree()
-				.size(isVertical ? [width - 80, height - 80] : [height - 80, width - 80]);
+				.nodeSize(isVertical ? [80, 110] : [80, 170]);
 
 			// Convert to D3 hierarchy
 			const root = d3.hierarchy(treeData.root, d => {
@@ -1134,6 +1198,29 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 
 			// Calculate layout
 			treeLayout(root);
+
+			// Fit the tree in the panel: scale down to 50% at most, then scroll
+			const padding = 60;
+			const screenX = d => isVertical ? d.x : d.y;
+			const screenY = d => isVertical ? d.y : d.x;
+			const nodesList = root.descendants();
+			const minX = d3.min(nodesList, screenX) - padding;
+			const minY = d3.min(nodesList, screenY) - padding;
+			const contentWidth = d3.max(nodesList, screenX) + padding - minX;
+			const contentHeight = d3.max(nodesList, screenY) + padding - minY;
+			const scale = Math.max(0.5, Math.min(1, width / contentWidth, height / contentHeight));
+			const svgWidth = Math.max(width, contentWidth * scale);
+			const svgHeight = Math.max(height, contentHeight * scale);
+			const viewWidth = svgWidth / scale;
+			const viewHeight = svgHeight / scale;
+			svg.attr('width', svgWidth)
+				.attr('height', svgHeight)
+				.attr('viewBox', [
+					minX - (viewWidth - contentWidth) / 2,
+					minY - (viewHeight - contentHeight) / 2,
+					viewWidth,
+					viewHeight
+				].join(' '));
 
 			// Store original positions for dragging
 			root.descendants().forEach(d => {
@@ -1282,103 +1369,45 @@ export function getWebviewHtml(webview: vscode.Webview, variableName: string | n
 			return div.innerHTML;
 		}
 
-		// Drag functions for nodes
+		// Drag functions for nodes (positions in screen coordinates: x right, y down)
+		function screenPosition(d) {
+			if (d.screen) {
+				return d.screen;
+			}
+			return isVertical ? { x: d.x, y: d.y } : { x: d.y, y: d.x };
+		}
+
 		function dragStarted(event, d) {
-			// Get current position (either fixed or original)
-			let currentX, currentY;
-			if (isVertical) {
-				currentX = (d.fx !== undefined && d.fx !== null) ? d.fx : d.x;
-				currentY = (d.fy !== undefined && d.fy !== null) ? d.fy : d.y;
-			} else {
-				currentX = (d.fy !== undefined && d.fy !== null) ? d.fy : d.y;
-				currentY = (d.fx !== undefined && d.fx !== null) ? d.fx : d.x;
-			}
-			
-			// Store the offset between mouse position and node position
-			d.dragOffsetX = event.x - currentX;
-			d.dragOffsetY = event.y - currentY;
-			
-			// Ensure fx and fy are set
-			if (isVertical) {
-				if (d.fx === undefined || d.fx === null) {
-					d.fx = d.x;
-				}
-				if (d.fy === undefined || d.fy === null) {
-					d.fy = d.y;
-				}
-			} else {
-				if (d.fx === undefined || d.fx === null) {
-					d.fx = d.y;
-				}
-				if (d.fy === undefined || d.fy === null) {
-					d.fy = d.x;
-				}
-			}
+			// Offset between the drag subject and the node, so the node doesn't jump to the pointer
+			const position = screenPosition(d);
+			d.dragOffsetX = event.x - position.x;
+			d.dragOffsetY = event.y - position.y;
 		}
 
 		function dragged(event, d) {
-			// Calculate new position using the offset
-			if (isVertical) {
-				d.fx = event.x - d.dragOffsetX;
-				d.fy = event.y - d.dragOffsetY;
-			} else {
-				d.fx = event.y - d.dragOffsetY;
-				d.fy = event.x - d.dragOffsetX;
-			}
+			d.screen = { x: event.x - d.dragOffsetX, y: event.y - d.dragOffsetY };
 			updateNodePosition(d);
 		}
 
 		function dragEnded(event, d) {
 			// Keep the node at the dragged position
-			// To reset, uncomment: d.fx = null; d.fy = null;
 		}
 
 		function updateNodePosition(d) {
-			// Update the node's transform
-			const nodeSelection = d3.selectAll('.node').filter(function() {
-				return d3.select(this).datum() === d;
-			});
-			
-			nodeSelection.attr('transform', isVertical 
-				? 'translate(' + d.fx + ',' + d.fy + ')' 
-				: 'translate(' + d.fy + ',' + d.fx + ')');
-			
-			// Create link generator with proper accessors
-			const linkGenerator = isVertical 
-				? d3.linkVertical().x(d => d.x).y(d => d.y)
-				: d3.linkHorizontal().x(d => d.y).y(d => d.x);
-			
-			// Update all links
+			const position = screenPosition(d);
+			d3.selectAll('.node')
+				.filter(function() { return d3.select(this).datum() === d; })
+				.attr('transform', 'translate(' + position.x + ',' + position.y + ')');
+
+			// Redraw every link from the current screen positions of its two nodes
+			const screenLink = (isVertical ? d3.linkVertical() : d3.linkHorizontal())
+				.x(p => p.x)
+				.y(p => p.y);
 			g.selectAll('.link')
-				.attr('d', function(linkData) {
-					const source = linkData.source;
-					const target = linkData.target;
-					
-					// Get positions - use fixed position if available, otherwise use original
-					let sourceX, sourceY, targetX, targetY;
-					
-					if (isVertical) {
-						sourceX = (source.fx !== undefined && source.fx !== null) ? source.fx : source.x;
-						sourceY = (source.fy !== undefined && source.fy !== null) ? source.fy : source.y;
-						targetX = (target.fx !== undefined && target.fx !== null) ? target.fx : target.x;
-						targetY = (target.fy !== undefined && target.fy !== null) ? target.fy : target.y;
-					} else {
-						sourceX = (source.fy !== undefined && source.fy !== null) ? source.fy : source.y;
-						sourceY = (source.fx !== undefined && source.fx !== null) ? source.fx : source.x;
-						targetX = (target.fy !== undefined && target.fy !== null) ? target.fy : target.y;
-						targetY = (target.fx !== undefined && target.fx !== null) ? target.fx : target.x;
-					}
-					
-					// Create source and target objects with x and y properties that linkGenerator expects
-					const sourcePoint = { x: sourceX, y: sourceY };
-					const targetPoint = { x: targetX, y: targetY };
-					
-					// Generate path using the link generator
-					return linkGenerator({
-						source: sourcePoint,
-						target: targetPoint
-					});
-				});
+				.attr('d', linkData => screenLink({
+					source: screenPosition(linkData.source),
+					target: screenPosition(linkData.target)
+				}));
 		}
 
 		// Handle window resize
