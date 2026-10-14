@@ -1,9 +1,13 @@
 {
   "name": "debug-dataStructures-visualizer-extension",
   "displayName": "Debug Data Structures Visualizer",
-  "description": "Visualize binary trees during debugging with interactive D3.js visualization. Supports Python and Java debugging. Doubly linked list support coming soon.",
-  "version": "1.0.1",
+  "description": "See your data structures while you debug: binary trees, linked lists, stacks, queues, heaps, hash tables, n-ary trees and tries, drawn live from Python and Java debug sessions.",
+  "version": "2.0.0",
   "publisher": "MCCProgrammer",
+  "author": {
+    "name": "MCCProgrammer",
+    "email": "contact@mccprogrammer.com"
+  },
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,7 +15,7 @@
   "categories": [
     "Debuggers",
     "Visualization",
-    "Programming Languages"
+    "Education"
   ],
   "keywords": [
     "debug",
@@ -22,20 +26,47 @@
     "d3",
     "python",
     "java",
-    "debugger"
+    "debugger",
+    "linked-list",
+    "stack",
+    "queue",
+    "heap",
+    "hash-table",
+    "trie",
+    "algorithms",
+    "students"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension"
   },
-  "activationEvents": [],
+  "bugs": {
+    "url": "https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension/issues"
+  },
+  "homepage": "https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension#readme",
+  "sponsor": {
+    "url": "https://ko-fi.com/mccprogrammer"
+  },
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onDebug"
+  ],
   "browser": "./dist/web/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "dataStructuresVisualizer.openVisualizer",
         "title": "Open Data Structure Visualizer",
+        "icon": "$(graph)",
+        "category": "Data Structures Visualizer"
+      },
+      {
+        "command": "dataStructuresVisualizer.visualizeVariable",
+        "title": "Visualize Data Structure",
         "icon": "$(graph)",
         "category": "Data Structures Visualizer"
       },
@@ -49,9 +80,9 @@
     "keybindings": [
       {
         "command": "dataStructuresVisualizer.openVisualizer",
-        "key": "ctrl+alt+v",
-        "mac": "cmd+opt+v",
-        "when": "debugState == 'stopped'"
+        "key": "ctrl+k ctrl+v",
+        "mac": "cmd+k cmd+v",
+        "when": "inDebugMode"
       },
       {
         "command": "dataStructuresVisualizer.refreshVisualization",
@@ -64,8 +95,34 @@
       "debug/toolbar": [
         {
           "command": "dataStructuresVisualizer.openVisualizer",
-          "when": "debugState == 'stopped'",
+          "when": "inDebugMode",
           "group": "visualization"
+        }
+      ],
+      "debug/variables/context": [
+        {
+          "command": "dataStructuresVisualizer.visualizeVariable",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "dataStructuresVisualizer.openVisualizer",
+          "when": "inDebugMode",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dataStructuresVisualizer.openVisualizer",
+          "when": "inDebugMode",
+          "group": "debug"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dataStructuresVisualizer.visualizeVariable",
+          "when": "false"
         }
       ],
       "webview/title": [
@@ -93,7 +150,10 @@
         },
         "dataStructuresVisualizer.treeOrientation": {
           "type": "string",
-          "enum": ["horizontal", "vertical"],
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
           "default": "horizontal",
           "description": "Orientation of the tree visualization. Horizontal: left to right. Vertical: top to bottom."
         },
@@ -129,12 +189,12 @@
     "@typescript-eslint/parser": "^8.45.0",
     "@vscode/test-web": "^0.0.74",
     "assert": "^2.1.0",
+    "d3": "7.9.0",
     "esbuild": "^0.25.10",
     "eslint": "^9.36.0",
     "glob": "^11.0.3",
     "mocha": "^11.7.4",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {}
+  }
 }

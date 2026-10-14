@@ -20,6 +20,21 @@
 			"preLaunchTask": "build"
 		},
 		{
+			"name": "Run Web Extension (examples)",
+			"type": "extensionHost",
+			"debugWebWorkerHost": true,
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"--extensionDevelopmentKind=web",
+				"${workspaceFolder}/examples"
+			],
+			"outFiles": [
+				"${workspaceFolder}/dist/web/**/*.js"
+			],
+			"preLaunchTask": "build"
+		},
+		{
 			"name": "Extension Tests",
 			"type": "extensionHost",
 			"debugWebWorkerHost": true,

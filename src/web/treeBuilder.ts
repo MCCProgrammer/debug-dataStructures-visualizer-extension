@@ -5,6 +5,9 @@
 import * as vscode from 'vscode';
 import { TreeNode, TreeData, VisualizationConfig } from './types';
 import { getCurrentFrameId, evaluateVariable, getVariableChildren, getVariables } from './debugAdapter';
+import { getNodeShape } from './structureDetector';
+import { buildStructure } from './structureBuilder';
+import { cleanValue } from './utils';
 
 /**
  * Builds a tree node from a variablesReference (DAP way)
@@ -42,7 +45,10 @@ async function buildTreeNodeFromReference(
 		// Build attributes map
 		const attributes: Record<string, any> = {};
 		for (const child of children) {
-			attributes[child.name] = child.value;
+			// Skip debugger groupings such as debugpy's "special variables"
+			if (!/\s/.test(child.name)) {
+				attributes[child.name] = cleanValue(child.value);
+			}
 		}
 
 		// Extract node value - try multiple common attribute names
@@ -244,11 +250,28 @@ async function buildTreeNodeWithPaths(
 
 		// Get node's children
 		const children = await getVariableChildren(nodeVariablesReference);
+
+		// Child paths left empty (e.g. a tree detected while still empty): detect them from this node
+		if (!config.leftPath || !config.rightPath) {
+			const shape = await getNodeShape(children, { remaining: 1 });
+			if (shape) {
+				config = {
+					...config,
+					leftPath: config.leftPath || shape.leftPath,
+					rightPath: config.rightPath || shape.rightPath,
+					keyPath: config.keyPath || shape.keyPath,
+					valuePath: config.valuePath || shape.valuePath
+				};
+			}
+		}
 		
 		// Build attributes map
 		const attributes: Record<string, any> = {};
 		for (const child of children) {
-			attributes[child.name] = child.value;
+			// Skip debugger groupings such as debugpy's "special variables"
+			if (!/\s/.test(child.name)) {
+				attributes[child.name] = cleanValue(child.value);
+			}
 		}
 
 		// Helper function to build full path using tree path as base
@@ -274,7 +297,7 @@ async function buildTreeNodeWithPaths(
 				const keyFullPath = buildFullPath(config.keyPath);
 				const keyEval = await evaluateVariable(keyFullPath, frameId);
 				if (keyEval && keyEval.result) {
-					nodeKey = String(keyEval.result);
+					nodeKey = String(cleanValue(keyEval.result));
 				} else if (keyEval && typeof keyEval === 'string') {
 					nodeKey = keyEval;
 				} else if (keyEval && typeof keyEval === 'number') {
@@ -297,7 +320,7 @@ async function buildTreeNodeWithPaths(
 				const valueFullPath = buildFullPath(config.valuePath);
 				const valueEval = await evaluateVariable(valueFullPath, frameId);
 				if (valueEval && valueEval.result) {
-					nodeValue = String(valueEval.result);
+					nodeValue = String(cleanValue(valueEval.result));
 				} else if (valueEval && typeof valueEval === 'string') {
 					nodeValue = valueEval;
 				} else if (valueEval && typeof valueEval === 'number') {
@@ -373,6 +396,14 @@ async function buildTreeNodeWithPaths(
 			node.val = nodeValue;
 		}
 
+		// Key/value fields of the node itself show the evaluated value (Java lists `Integer@24` as the field value)
+		if (config.keyPath && nodeKey !== undefined && attributes[config.keyPath] !== undefined) {
+			attributes[config.keyPath] = nodeKey;
+		}
+		if (config.valuePath && nodeValue !== undefined && attributes[config.valuePath] !== undefined) {
+			attributes[config.valuePath] = nodeValue;
+		}
+
 		if (leftChild || rightChild) {
 			node.left = leftChild || undefined;
 			node.right = rightChild || undefined;
@@ -395,10 +426,7 @@ async function buildTreeNodeWithPaths(
 export async function getTreeDataWithConfig(config: VisualizationConfig): Promise<TreeData> {
 	try {
 		if (config.visualizationType !== 'binaryTree') {
-			return {
-				root: null,
-				error: `Visualization type "${config.visualizationType}" is not yet implemented. Only binaryTree is supported.`
-			};
+			return await buildStructure(config);
 		}
 
 		// Get the root variable

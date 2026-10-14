@@ -7,8 +7,15 @@ import { VisualizationConfig, TreeData } from './types';
 import { searchVariableInAllScopes, getCurrentFrameId, evaluateVariable } from './debugAdapter';
 import { getTreeData, getTreeDataWithConfig } from './treeBuilder';
 import { getWebviewHtml } from './htmlGenerator';
+import { detectTrees, detectStructureAt } from './structureDetector';
+import { hasContent } from './structureBuilder';
+import { recordSuccessfulVisualization } from './ratingPrompt';
+import { cleanValue } from './utils';
 
 export interface WebviewManagerDependencies {
+	context: vscode.ExtensionContext;
+	// Starts a visualization in a panel without going through its wizard
+	starters: Map<vscode.WebviewPanel, (config: VisualizationConfig) => Promise<void>>;
 	activePanels: Map<string, vscode.WebviewPanel>;
 	panelConfigs: Map<string, VisualizationConfig>;
 	visualizationCache: Map<string, VisualizationConfig[]>;
@@ -36,7 +43,8 @@ export async function createOrRevealPanel(
 		vscode.ViewColumn.Beside,
 		{
 			enableScripts: true,
-			retainContextWhenHidden: true
+			retainContextWhenHidden: true,
+			localResourceRoots: [vscode.Uri.joinPath(deps.context.extensionUri, 'dist', 'media')]
 		}
 	);
 
@@ -52,12 +60,53 @@ export async function createOrRevealPanel(
 	let currentVariableName = variableName;
 	let currentConfig: VisualizationConfig | null = null;
 
+	async function start(config: VisualizationConfig) {
+		currentConfig = config;
+		currentVariableName = config.variablePath;
+		deps.panelConfigs.set(panelId, config);
+		const displayName = config.label || config.treePath || config.variablePath;
+		panel!.title = `Data Structure Visualizer: ${displayName}`;
+
+		// Save to cache (last 10 configurations of this debug session)
+		const sessionId = vscode.debug.activeDebugSession?.id || 'default';
+		if (!deps.visualizationCache.has(sessionId)) {
+			deps.visualizationCache.set(sessionId, []);
+		}
+		const cache = deps.visualizationCache.get(sessionId)!;
+		const exists = cache.some(c =>
+			c.variablePath === config.variablePath &&
+			c.visualizationType === config.visualizationType &&
+			c.treePath === config.treePath
+		);
+		if (!exists) {
+			cache.push({ ...config });
+			if (cache.length > 10) {
+				cache.shift();
+			}
+		}
+
+		updateWebviewContent(panel!, displayName, false, config, undefined, deps);
+		const treeData = await refreshVisualizationWithConfig(panel!, config);
+		if (hasContent(treeData)) {
+			void recordSuccessfulVisualization(deps.context, vscode.debug.activeDebugSession?.id);
+		}
+	}
+
+	deps.starters.set(panel, start);
+	panel.onDidDispose(() => deps.starters.delete(panel!));
+
 	// Handle messages from webview
 	panel.webview.onDidReceiveMessage(async (message) => {
-		const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
-		const delay = config.get<number>('autoRefreshInterval', 300);
-		
 		switch (message.command) {
+			case 'detectTrees':
+				// Wizard opened: offer the trees found in the current frame
+				try {
+					const trees = await detectTrees();
+					panel.webview.postMessage({ command: 'detectedTrees', trees });
+				} catch (error: any) {
+					panel.webview.postMessage({ command: 'detectedTrees', trees: [], error: error.message || 'Failed to detect trees' });
+				}
+				break;
 			case 'searchVariable':
 				// Wizard step 1: Search for variable
 				try {
@@ -75,36 +124,27 @@ export async function createOrRevealPanel(
 				break;
 			case 'startVisualization':
 				// Wizard step: Start visualization with config
-				currentConfig = message.config as VisualizationConfig;
-				currentVariableName = currentConfig.variablePath;
-				deps.panelConfigs.set(panelId, currentConfig);
-				panel.title = `Data Structure Visualizer: ${currentConfig.variablePath}`;
-				
-				// Save to cache
-				const sessionId = vscode.debug.activeDebugSession?.id || 'default';
-				if (!deps.visualizationCache.has(sessionId)) {
-					deps.visualizationCache.set(sessionId, []);
-				}
-				const cache = deps.visualizationCache.get(sessionId)!;
-				// Check if config already exists in cache
-				if (currentConfig) {
-					const config = currentConfig;
-					const exists = cache.some(c => 
-						c.variablePath === config.variablePath &&
-						c.visualizationType === config.visualizationType &&
-						c.treePath === config.treePath
-					);
-					if (!exists) {
-						cache.push({ ...config });
-						// Keep only last 10 configurations
-						if (cache.length > 10) {
-							cache.shift();
-						}
+				await start(message.config as VisualizationConfig);
+				break;
+			case 'autoDetectVariable':
+				// Wizard step 2 "Detect automatically": find the structure of the chosen variable
+				try {
+					const evalResult = await evaluateVariable(message.variablePath, await getCurrentFrameId());
+					const detected = await detectStructureAt(message.variablePath, {
+						name: message.variablePath,
+						value: evalResult?.result,
+						type: evalResult?.type,
+						variablesReference: evalResult?.variablesReference,
+						indexedVariables: evalResult?.indexedVariables
+					});
+					if (detected) {
+						await start(detected.config);
+					} else {
+						panel.webview.postMessage({ command: 'autoDetectError', error: `No supported data structure found in "${message.variablePath}".` });
 					}
+				} catch (error: any) {
+					panel.webview.postMessage({ command: 'autoDetectError', error: error.message || 'Failed to detect the structure' });
 				}
-				
-				updateWebviewContent(panel, currentConfig.variablePath, false, currentConfig, undefined, deps);
-				await refreshVisualizationWithConfig(panel, currentConfig);
 				break;
 			case 'refresh':
 				if (currentConfig) {
@@ -155,7 +195,7 @@ export async function createOrRevealPanel(
 					
 					let value: any = null;
 					if (evalResult && evalResult.result) {
-						value = evalResult.result;
+						value = cleanValue(evalResult.result);
 					} else if (evalResult && evalResult.value) {
 						value = evalResult.value;
 					} else if (evalResult && typeof evalResult !== 'object') {
@@ -192,7 +232,7 @@ export async function createOrRevealPanel(
 					
 					let sizeValue = 'N/A';
 					if (sizeEval && sizeEval.result) {
-						sizeValue = String(sizeEval.result);
+						sizeValue = String(cleanValue(sizeEval.result));
 					} else if (sizeEval && typeof sizeEval === 'string') {
 						sizeValue = sizeEval;
 					} else if (sizeEval && sizeEval.value) {
@@ -224,49 +264,18 @@ export async function createOrRevealPanel(
 					await refreshVisualization(panel, newVariableName);
 				}
 				break;
+			// The panels refresh when the debugger reports "stopped" (see the tracker in extension.ts)
 			case 'debugStepOver':
 				await vscode.commands.executeCommand('workbench.action.debug.stepOver');
-				// Auto-refresh after step over
-				setTimeout(async () => {
-					if (currentConfig) {
-						await refreshVisualizationWithConfig(panel!, currentConfig);
-					} else {
-						await refreshVisualization(panel!, currentVariableName);
-					}
-				}, delay);
 				break;
 			case 'debugStepInto':
 				await vscode.commands.executeCommand('workbench.action.debug.stepInto');
-				// Auto-refresh after step into
-				setTimeout(async () => {
-					if (currentConfig) {
-						await refreshVisualizationWithConfig(panel!, currentConfig);
-					} else {
-						await refreshVisualization(panel!, currentVariableName);
-					}
-				}, delay);
 				break;
 			case 'debugStepOut':
 				await vscode.commands.executeCommand('workbench.action.debug.stepOut');
-				// Auto-refresh after step out
-				setTimeout(async () => {
-					if (currentConfig) {
-						await refreshVisualizationWithConfig(panel!, currentConfig);
-					} else {
-						await refreshVisualization(panel!, currentVariableName);
-					}
-				}, delay);
 				break;
 			case 'debugContinue':
 				await vscode.commands.executeCommand('workbench.action.debug.continue');
-				// Auto-refresh after continue (when it stops again)
-				setTimeout(async () => {
-					if (currentConfig) {
-						await refreshVisualizationWithConfig(panel!, currentConfig);
-					} else {
-						await refreshVisualization(panel!, currentVariableName);
-					}
-				}, delay);
 				break;
 		}
 	});
@@ -293,22 +302,21 @@ export async function refreshVisualization(panel: vscode.WebviewPanel, variableN
 /**
  * Refreshes the visualization using a configuration with paths
  */
-export async function refreshVisualizationWithConfig(panel: vscode.WebviewPanel, config: VisualizationConfig) {
+export async function refreshVisualizationWithConfig(panel: vscode.WebviewPanel, config: VisualizationConfig): Promise<TreeData> {
+	let treeData: TreeData;
 	try {
-		const treeData = await getTreeDataWithConfig(config);
-		panel.webview.postMessage({
-			command: 'updateTree',
-			data: treeData
-		});
+		treeData = await getTreeDataWithConfig(config);
 	} catch (error: any) {
-		panel.webview.postMessage({
-			command: 'updateTree',
-			data: {
-				root: null,
-				error: error.message || 'Failed to build tree'
-			}
-		});
+		treeData = {
+			root: null,
+			error: error.message || 'Failed to build tree'
+		};
 	}
+	panel.webview.postMessage({
+		command: 'updateTree',
+		data: treeData
+	});
+	return treeData;
 }
 
 /**
@@ -318,9 +326,9 @@ export function updateWebviewContent(
 	panel: vscode.WebviewPanel,
 	variableName: string | null,
 	showWizard: boolean = false,
-	visualizationConfig?: VisualizationConfig,
-	wizardConfig?: VisualizationConfig,
-	deps?: WebviewManagerDependencies
+	visualizationConfig: VisualizationConfig | undefined,
+	wizardConfig: VisualizationConfig | undefined,
+	deps: WebviewManagerDependencies
 ) {
 	const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
 	const showDebugControls = config.get<boolean>('showDebugControls', true);
@@ -328,9 +336,9 @@ export function updateWebviewContent(
 	
 	// Get cache for current session
 	const sessionId = vscode.debug.activeDebugSession?.id || 'default';
-	const cache = deps ? (deps.visualizationCache.get(sessionId) || []) : [];
+	const cache = deps.visualizationCache.get(sessionId) || [];
 
-	panel.webview.html = getWebviewHtml(panel.webview, variableName, showDebugControls, treeOrientation, showWizard, visualizationConfig, cache, wizardConfig);
+	panel.webview.html = getWebviewHtml(panel.webview, deps.context.extensionUri, variableName, showDebugControls, treeOrientation, showWizard, visualizationConfig, cache, wizardConfig);
 	
 	// If we have a config, send it to the webview for size display
 	if (visualizationConfig && !showWizard) {
@@ -344,11 +352,18 @@ export function updateWebviewContent(
 /**
  * Refreshes all active visualizations
  */
+// Several triggers fire on the same stop (debug adapter event, active frame change): refresh once
+let pendingRefresh: ReturnType<typeof setTimeout> | undefined;
+
 export async function refreshAllVisualizations(deps: WebviewManagerDependencies) {
 	const config = vscode.workspace.getConfiguration('dataStructuresVisualizer');
 	const delay = config.get<number>('autoRefreshInterval', 300);
-	
-	setTimeout(async () => {
+
+	if (pendingRefresh) {
+		clearTimeout(pendingRefresh);
+	}
+	pendingRefresh = setTimeout(async () => {
+		pendingRefresh = undefined;
 		// Refresh all active panels
 		for (const [panelId, panel] of deps.activePanels.entries()) {
 			if (panel.visible) {
@@ -357,7 +372,7 @@ export async function refreshAllVisualizations(deps: WebviewManagerDependencies)
 					await refreshVisualizationWithConfig(panel, config);
 				} else {
 					const match = panelId.match(/visualizer_(.+)/);
-					if (match && match[1] && match[1] !== 'wizard') {
+					if (match && match[1] && !match[1].startsWith('wizard')) {
 						await refreshVisualization(panel, match[1]);
 					}
 				}

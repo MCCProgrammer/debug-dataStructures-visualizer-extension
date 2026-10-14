@@ -1,6 +1,9 @@
 .vscode/**
 .vscode-test-web/**
 src/**
+examples/**
+.github/**
+images/**
 out/**
 node_modules/**
 !node_modules/github-markdown-css/**
