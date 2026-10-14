@@ -20,14 +20,14 @@
 			"preLaunchTask": "build"
 		},
 		{
-			"name": "Run Web Extension (test programs)",
+			"name": "Run Web Extension (examples)",
 			"type": "extensionHost",
 			"debugWebWorkerHost": true,
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
 				"--extensionDevelopmentKind=web",
-				"${workspaceFolder}/test-programs"
+				"${workspaceFolder}/examples"
 			],
 			"outFiles": [
 				"${workspaceFolder}/dist/web/**/*.js"

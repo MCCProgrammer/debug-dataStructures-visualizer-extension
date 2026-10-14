@@ -2,7 +2,7 @@
 Test program for Debug Data Structures Visualizer.
 
 Set breakpoints on the lines marked "BREAKPOINT", start debugging (F5),
-then open the visualizer with Cmd+Opt+V (Ctrl+Alt+V). See ../TESTING.md.
+then open the visualizer with Cmd+K Cmd+V (Ctrl+K Ctrl+V). See README.md in this folder.
 """
 
 

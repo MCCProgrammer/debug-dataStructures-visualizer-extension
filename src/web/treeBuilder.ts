@@ -5,7 +5,8 @@
 import * as vscode from 'vscode';
 import { TreeNode, TreeData, VisualizationConfig } from './types';
 import { getCurrentFrameId, evaluateVariable, getVariableChildren, getVariables } from './debugAdapter';
-import { getNodeShape } from './treeDetector';
+import { getNodeShape } from './structureDetector';
+import { buildStructure } from './structureBuilder';
 import { cleanValue } from './utils';
 
 /**
@@ -425,10 +426,7 @@ async function buildTreeNodeWithPaths(
 export async function getTreeDataWithConfig(config: VisualizationConfig): Promise<TreeData> {
 	try {
 		if (config.visualizationType !== 'binaryTree') {
-			return {
-				root: null,
-				error: `Visualization type "${config.visualizationType}" is not yet implemented. Only binaryTree is supported.`
-			};
+			return await buildStructure(config);
 		}
 
 		// Get the root variable

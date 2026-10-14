@@ -229,10 +229,10 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 		
 		<!-- Step 1: Variable Name -->
 		<div class="wizard-step active" id="step1">
-			<h2>Step 1: Choose a Tree</h2>
+			<h2>Step 1: Choose a Data Structure</h2>
 			<div id="detected-section" style="display: ${autoDetect ? 'block' : 'none'}; margin-bottom: 20px;">
-				<label style="display: block; margin-bottom: 5px; font-weight: 500;">Trees found in the current frame:</label>
-				<div id="detected-loading" class="loading">Looking for trees...</div>
+				<label style="display: block; margin-bottom: 5px; font-weight: 500;">Data structures found in the current frame:</label>
+				<div id="detected-loading" class="loading">Looking for data structures...</div>
 				<div id="detected-list" class="variable-locations"></div>
 				<div id="detected-empty" class="help-text" style="display: none;"></div>
 			</div>
@@ -259,7 +259,7 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 									<div style="font-weight: bold; font-family: monospace;">${escapeHtml(c.variablePath)}</div>
 									<div style="font-size: 12px; color: var(--vscode-descriptionForeground);">Type: ${c.visualizationType}${c.treePath ? ` | Tree: ${escapeHtml(c.treePath)}` : ''}</div>
 								</div>
-								<button class="cache-edit-btn" data-index="${idx}" style="padding: 4px 8px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Edit</button>
+								${c.visualizationType !== 'binaryTree' ? '' : `<button class="cache-edit-btn" data-index="${idx}" style="padding: 4px 8px; background-color: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border); border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Edit</button>`}
 							</div>
 						</div>
 					`).join('')}
@@ -274,11 +274,13 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			<div class="form-group">
 				<label for="visualization-type">Data Structure Type:</label>
 				<select id="visualization-type">
-					<option value="binaryTree">Binary Tree</option>
-					<option value="doublyLinkedList" disabled>Doubly Linked List (Coming Soon)</option>
+					<option value="auto">Detect automatically (linked list, stack, queue, heap, hash table, n-ary tree, binary tree)</option>
+					<option value="binaryTree">Binary Tree (set each path yourself)</option>
 				</select>
 				<div class="help-text">Select the type of data structure you want to visualize.</div>
 			</div>
+			<div id="auto-detect-error" class="error-message" style="display: none;"></div>
+			<div id="auto-detect-loading" class="loading" style="display: none;">Detecting the structure...</div>
 			<div class="button-group">
 				<button class="secondary" id="back-to-step1">Back</button>
 				<button id="next-to-step3">Next</button>
@@ -442,12 +444,18 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 
 		// Step 2: Navigation
 		document.getElementById('next-to-step3').addEventListener('click', () => {
-			if (selectedVariablePath) {
-				showStep(3);
-				updatePathPrefixes();
-			} else {
+			if (!selectedVariablePath) {
 				alert('Please select a variable path first');
+				return;
 			}
+			if (document.getElementById('visualization-type').value === 'auto') {
+				document.getElementById('auto-detect-error').style.display = 'none';
+				document.getElementById('auto-detect-loading').style.display = 'block';
+				vscode.postMessage({ command: 'autoDetectVariable', variablePath: selectedVariablePath });
+				return;
+			}
+			showStep(3);
+			updatePathPrefixes();
 		});
 
 		document.getElementById('back-to-step1').addEventListener('click', () => {
@@ -626,6 +634,11 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 				case 'detectedTrees':
 					renderDetectedTrees(message.trees || [], message.error);
 					break;
+				case 'autoDetectError':
+					document.getElementById('auto-detect-loading').style.display = 'none';
+					document.getElementById('auto-detect-error').style.display = 'block';
+					document.getElementById('auto-detect-error').textContent = message.error;
+					break;
 				case 'variableSearchResults':
 					document.getElementById('variable-search-loading').style.display = 'none';
 					const locations = message.locations || [];
@@ -703,17 +716,14 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 			if (trees.length === 0) {
 				empty.textContent = error
 					? 'Could not scan the current frame (' + error + '). Enter the variable name below.'
-					: 'No tree found automatically. Enter the variable name below.';
+					: 'No data structure found automatically. Enter the variable name below.';
 				empty.style.display = 'block';
 				return;
 			}
 
 			trees.forEach(tree => {
 				const c = tree.config;
-				const details = tree.empty ? ['empty for now'] : ['children: ' + c.leftPath + ' / ' + c.rightPath];
-				if (c.keyPath) details.push('key: ' + c.keyPath);
-				if (c.valuePath) details.push('value: ' + c.valuePath);
-				if (c.sizePath) details.push('size: ' + c.sizePath);
+				const editable = c.visualizationType === 'binaryTree';
 
 				const item = document.createElement('div');
 				item.className = 'variable-location detected-tree';
@@ -721,17 +731,19 @@ export function getWizardHtml(webview: vscode.Webview, cache: VisualizationConfi
 				item.innerHTML = \`
 					<div class="info">
 						<div class="path">\${escapeHtml(tree.path)}</div>
-						<div class="scope">\${escapeHtml(details.join(' · '))} · \${escapeHtml(tree.scope)}</div>
+						<div class="scope">\${escapeHtml(tree.description)} · \${escapeHtml(tree.scope)}</div>
 					</div>
-					<button class="secondary" title="Adjust the paths before visualizing">Edit</button>
+					\${editable ? '<button class="secondary" title="Adjust the paths before visualizing">Edit</button>' : ''}
 				\`;
 				item.addEventListener('click', () => {
 					vscode.postMessage({ command: 'startVisualization', config: c });
 				});
-				item.querySelector('button').addEventListener('click', (e) => {
-					e.stopPropagation();
-					fillForm(c);
-				});
+				if (editable) {
+					item.querySelector('button').addEventListener('click', (e) => {
+						e.stopPropagation();
+						fillForm(c);
+					});
+				}
 				list.appendChild(item);
 			});
 		}
@@ -926,6 +938,78 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 		#tree-container svg {
 			display: block;
 		}
+		.item {
+			cursor: pointer;
+		}
+		.item.empty {
+			cursor: default;
+		}
+		.item-box, .cell {
+			fill: var(--vscode-button-background);
+			stroke: var(--vscode-editor-background);
+			stroke-width: 2px;
+		}
+		.cell.empty {
+			fill: transparent;
+			stroke: var(--vscode-descriptionForeground);
+			stroke-dasharray: 4 3;
+			stroke-opacity: 0.6;
+		}
+		.ptr {
+			fill: var(--vscode-editor-background);
+			stroke: var(--vscode-button-background);
+			stroke-width: 2px;
+		}
+		.ptr-dot, .arrowhead {
+			fill: var(--vscode-descriptionForeground);
+		}
+		.null-slash {
+			stroke: var(--vscode-descriptionForeground);
+			stroke-width: 1.5px;
+		}
+		.item-label {
+			fill: var(--vscode-button-foreground);
+			font-family: monospace;
+			font-size: 12px;
+			font-weight: bold;
+			pointer-events: none;
+		}
+		.index-text, .legend-text, .edge-label {
+			fill: var(--vscode-descriptionForeground);
+			font-family: monospace;
+			font-size: 11px;
+		}
+		.marker-text {
+			fill: var(--vscode-editor-foreground);
+			font-size: 12px;
+			font-weight: bold;
+		}
+		.arrow {
+			fill: none;
+			stroke: var(--vscode-descriptionForeground);
+			stroke-width: 1.5px;
+		}
+		.arrow.prev, .legend-text.prev {
+			stroke-dasharray: 4 3;
+		}
+		.node circle.terminal {
+			stroke: var(--vscode-editor-foreground);
+			stroke-width: 3px;
+		}
+		.heap-layout {
+			display: flex;
+			flex-direction: column;
+			height: 100%;
+		}
+		.heap-strip {
+			flex: 0 0 auto;
+			border-bottom: 1px solid var(--vscode-panel-border);
+		}
+		.heap-tree {
+			flex: 1;
+			min-height: 0;
+			overflow: auto;
+		}
 		.node {
 			cursor: pointer;
 		}
@@ -979,6 +1063,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 		.node-info td {
 			padding: 5px;
 			border-bottom: 1px solid var(--vscode-panel-border);
+			overflow-wrap: anywhere;
 		}
 		.node-info td:first-child {
 			font-weight: bold;
@@ -1170,16 +1255,323 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 				return;
 			}
 
-			if (!treeData.root) {
+			const kind = treeData.kind || 'binaryTree';
+			if (kind === 'linkedList') {
+				renderLinkedList(container);
+			} else if (kind === 'array') {
+				renderArray(container);
+			} else if (kind === 'hashTable') {
+				renderHashTable(container);
+			} else if (kind === 'heap') {
+				renderHeap(container);
+			} else if (!treeData.root) {
 				container.innerHTML = '<div class="empty">Tree is empty (null root)</div>';
+			} else {
+				renderHierarchy(container, treeData.root, kind);
+			}
+		}
+
+		// Sizes the SVG to its panel: the content is scaled down to 50% at most, then the panel scrolls
+		function fitSvg(target, minX, minY, contentWidth, contentHeight) {
+			const width = target.clientWidth || 800;
+			const height = target.clientHeight || 600;
+			const scale = Math.max(0.5, Math.min(1, width / contentWidth, height / contentHeight));
+			const svgWidth = Math.max(width, contentWidth * scale);
+			const svgHeight = Math.max(height, contentHeight * scale);
+			const viewWidth = svgWidth / scale;
+			const viewHeight = svgHeight / scale;
+			svg.attr('width', svgWidth)
+				.attr('height', svgHeight)
+				.attr('viewBox', [
+					minX - (viewWidth - contentWidth) / 2,
+					minY - (viewHeight - contentHeight) / 2,
+					viewWidth,
+					viewHeight
+				].join(' '));
+		}
+
+		function truncate(text, max) {
+			const value = String(text);
+			return value.length > max ? value.substring(0, max) + '...' : value;
+		}
+
+		// Width of a box that fits its label (monospace 12px)
+		function boxWidth(label, min, max) {
+			return Math.max(min, Math.min(max, String(label).length * 7.5 + 20));
+		}
+
+		function addArrowMarker() {
+			svg.append('defs').append('marker')
+				.attr('id', 'arrowhead')
+				.attr('viewBox', '0 0 10 10')
+				.attr('refX', 9)
+				.attr('refY', 5)
+				.attr('markerWidth', 7)
+				.attr('markerHeight', 7)
+				.attr('orient', 'auto-start-reverse')
+				.append('path')
+				.attr('class', 'arrowhead')
+				.attr('d', 'M 0 0 L 10 5 L 0 10 z');
+		}
+
+		function arrow(parent, x1, y1, x2, y2, className) {
+			parent.append('path')
+				.attr('class', 'arrow' + (className ? ' ' + className : ''))
+				.attr('d', 'M ' + x1 + ' ' + y1 + ' L ' + x2 + ' ' + y2)
+				.attr('marker-end', 'url(#arrowhead)');
+		}
+
+		// Pointer compartment of a list box: a dot when it points somewhere, a slash when null
+		function pointerCell(parent, x, y, width, height, isSet) {
+			parent.append('rect').attr('class', 'ptr').attr('x', x).attr('y', y).attr('width', width).attr('height', height);
+			if (isSet) {
+				parent.append('circle').attr('class', 'ptr-dot').attr('cx', x + width / 2).attr('cy', y + height / 2).attr('r', 3);
+			} else {
+				parent.append('line').attr('class', 'null-slash').attr('x1', x + 3).attr('y1', y + height - 3).attr('x2', x + width - 3).attr('y2', y + 3);
+			}
+		}
+
+		// Label above an item with an arrow pointing down at it (head, tail, top, front, rear)
+		function markerLabel(parent, x, y, text) {
+			parent.append('text').attr('class', 'marker-text').attr('x', x).attr('y', y - 26).attr('text-anchor', 'middle').text(text);
+			arrow(parent, x, y - 20, x, y - 4);
+		}
+
+		function itemData(item) {
+			return { key: item.key, val: item.val, attributes: Object.assign(item.index !== undefined ? { index: item.index } : {}, item.attributes || {}) };
+		}
+
+		// ---------------------------------------------------------------- linked lists
+		function renderLinkedList(container) {
+			const items = treeData.items || [];
+			const headLabel = treeData.headLabel || 'head';
+			if (items.length === 0) {
+				container.innerHTML = '<div class="empty">List is empty (' + escapeHtml(headLabel) + ' is null)</div>';
 				return;
 			}
+			const doubly = !!treeData.doubly;
+			const pointerWidth = 18, boxHeight = 44, gap = 56;
+			svg = d3.select(container).append('svg');
+			addArrowMarker();
+			g = svg.append('g');
 
-			// Setup SVG
-			const width = container.clientWidth || 800;
-			const height = container.clientHeight || 600;
-			
-			svg = d3.select(container)
+			let x = 0;
+			const boxes = items.map((item, i) => {
+				const valueWidth = boxWidth(item.label, 56, 150);
+				const box = { item, x, valueWidth, width: valueWidth + pointerWidth * (doubly ? 2 : 1) };
+				x += box.width + gap;
+				return box;
+			});
+
+			boxes.forEach((box, i) => {
+				const isLast = i === boxes.length - 1;
+				const group = g.append('g')
+					.attr('class', 'item')
+					.attr('transform', 'translate(' + box.x + ',0)')
+					.on('click', () => showNodeInfo(itemData(box.item)));
+				let valueX = 0;
+				if (doubly) {
+					pointerCell(group, 0, 0, pointerWidth, boxHeight, i > 0);
+					valueX = pointerWidth;
+				}
+				group.append('rect').attr('class', 'item-box').attr('x', valueX).attr('y', 0).attr('width', box.valueWidth).attr('height', boxHeight);
+				group.append('text').attr('class', 'item-label').attr('x', valueX + box.valueWidth / 2).attr('y', boxHeight / 2).attr('dy', '.35em')
+					.attr('text-anchor', 'middle').text(truncate(box.item.label, 16));
+				pointerCell(group, valueX + box.valueWidth, 0, pointerWidth, boxHeight, !isLast || !!treeData.truncated);
+
+				if (!isLast) {
+					const next = boxes[i + 1];
+					const nextY = doubly ? boxHeight / 2 - 9 : boxHeight / 2;
+					arrow(g, box.x + box.width - pointerWidth / 2, nextY, next.x - 2, nextY);
+					if (doubly) {
+						arrow(g, next.x + pointerWidth / 2, boxHeight / 2 + 9, box.x + box.width + 2, boxHeight / 2 + 9, 'prev');
+					}
+				}
+			});
+
+			const first = boxes[0];
+			const last = boxes[boxes.length - 1];
+			const tailLabel = treeData.tailLabel;
+			if (tailLabel && boxes.length === 1) {
+				markerLabel(g, first.x + first.width / 2, 0, headLabel + ' / ' + tailLabel);
+			} else {
+				markerLabel(g, first.x + first.width / 2, 0, headLabel);
+				if (tailLabel) {
+					markerLabel(g, last.x + last.width / 2, 0, tailLabel);
+				}
+			}
+			if (treeData.truncated) {
+				g.append('text').attr('class', 'marker-text').attr('x', last.x + last.width + 20).attr('y', boxHeight / 2).attr('dy', '.35em').text('...');
+			}
+			if (doubly) {
+				g.append('text').attr('class', 'legend-text').attr('x', 0).attr('y', boxHeight + 30).text('→ next   ');
+				g.append('text').attr('class', 'legend-text prev').attr('x', 70).attr('y', boxHeight + 30).text('← previous');
+			}
+
+			fitSvg(container, -40, -60, last.x + last.width + 80, boxHeight + 110);
+		}
+
+		// ---------------------------------------------------------------- arrays, stacks, queues
+		function drawCells(parent, cells, vertical, cellWidth, cellHeight, onClick) {
+			cells.forEach((cell, i) => {
+				const x = vertical ? 0 : i * cellWidth;
+				const y = vertical ? -i * cellHeight : 0;
+				const group = parent.append('g')
+					.attr('class', 'item' + (cell.empty ? ' empty' : ''))
+					.attr('transform', 'translate(' + x + ',' + y + ')');
+				if (!cell.empty && onClick) {
+					group.on('click', () => onClick(cell));
+				}
+				group.append('rect').attr('class', 'cell' + (cell.empty ? ' empty' : '')).attr('width', cellWidth).attr('height', cellHeight);
+				group.append('text').attr('class', 'item-label').attr('x', cellWidth / 2).attr('y', cellHeight / 2).attr('dy', '.35em')
+					.attr('text-anchor', 'middle').text(cell.empty ? '' : truncate(cell.label, 12));
+				const index = cell.index !== undefined ? cell.index : i;
+				if (vertical) {
+					group.append('text').attr('class', 'index-text').attr('x', -10).attr('y', cellHeight / 2).attr('dy', '.35em').attr('text-anchor', 'end').text(index);
+				} else {
+					group.append('text').attr('class', 'index-text').attr('x', cellWidth / 2).attr('y', cellHeight + 16).attr('text-anchor', 'middle').text(index);
+				}
+			});
+		}
+
+		function renderArray(container) {
+			const cells = treeData.items || [];
+			const vertical = !!treeData.vertical;
+			const cellHeight = 40;
+			const cellWidth = Math.max(52, ...cells.map(c => boxWidth(truncate(c.label, 12), 52, 120)));
+			svg = d3.select(container).append('svg');
+			addArrowMarker();
+			g = svg.append('g');
+
+			if (cells.length === 0) {
+				container.innerHTML = '<div class="empty">Array is empty</div>';
+				return;
+			}
+			drawCells(g, cells, vertical, cellWidth, cellHeight, cell => showNodeInfo(itemData(cell)));
+
+			// Markers (top, front, rear), several on the same cell share one label
+			const byIndex = {};
+			Object.entries(treeData.markers || {}).forEach(([name, index]) => {
+				const position = cells.findIndex(c => c.index === index);
+				if (position >= 0) {
+					(byIndex[position] = byIndex[position] || []).push(name);
+				}
+			});
+			Object.entries(byIndex).forEach(([position, names]) => {
+				const p = Number(position);
+				if (vertical) {
+					const y = -p * cellHeight + cellHeight / 2;
+					g.append('text').attr('class', 'marker-text').attr('x', cellWidth + 40).attr('y', y).attr('dy', '.35em').text(names.join(' / '));
+					arrow(g, cellWidth + 34, y, cellWidth + 4, y);
+				} else {
+					markerLabel(g, p * cellWidth + cellWidth / 2, 0, names.join(' / '));
+				}
+			});
+
+			const count = cells.length;
+			if (treeData.hiddenCells) {
+				const note = '... ' + treeData.hiddenCells + ' more';
+				if (vertical) {
+					g.append('text').attr('class', 'index-text').attr('x', 0).attr('y', -count * cellHeight + cellHeight / 2).text(note);
+				} else {
+					g.append('text').attr('class', 'index-text').attr('x', count * cellWidth + 12).attr('y', cellHeight / 2).attr('dy', '.35em').text(note);
+				}
+			}
+
+			if (vertical) {
+				fitSvg(container, -60, -count * cellHeight - 40, cellWidth + 180, count * cellHeight + 90);
+			} else {
+				fitSvg(container, -30, -60, count * cellWidth + (treeData.hiddenCells ? 110 : 60), cellHeight + 100);
+			}
+		}
+
+		// ---------------------------------------------------------------- heaps: tree + the array behind it
+		function renderHeap(container) {
+			const items = treeData.items || [];
+			if (items.length === 0) {
+				container.innerHTML = '<div class="empty">Heap is empty</div>';
+				return;
+			}
+			container.innerHTML = '<div class="heap-layout"><div class="heap-strip" id="heap-strip"></div><div class="heap-tree" id="heap-tree"></div></div>';
+
+			// Array strip: index i has children 2i+1 and 2i+2
+			const strip = document.getElementById('heap-strip');
+			const cellWidth = Math.max(44, ...items.map(c => boxWidth(truncate(c.label, 8), 44, 90)));
+			const stripSvg = d3.select(strip).append('svg')
+				.attr('width', '100%')
+				.attr('height', 74)
+				.attr('viewBox', [-20, -6, items.length * cellWidth + 40, 74].join(' '))
+				.attr('preserveAspectRatio', 'xMidYMid meet');
+			drawCells(stripSvg.append('g'), items.map((item, i) => Object.assign({}, item, { label: truncate(item.label, 8), index: i })), false, cellWidth, 38, cell => showNodeInfo(itemData(cell)));
+
+			function heapNode(i) {
+				if (i >= items.length) {
+					return null;
+				}
+				const item = items[i];
+				const node = { id: item.id, value: item.label, key: item.key, val: item.val, attributes: Object.assign({ index: i }, item.attributes || {}) };
+				const left = heapNode(2 * i + 1);
+				const right = heapNode(2 * i + 2);
+				if (left) { node.left = left; }
+				if (right) { node.right = right; }
+				return node;
+			}
+			renderHierarchy(document.getElementById('heap-tree'), heapNode(0), 'heap');
+		}
+
+		// ---------------------------------------------------------------- hash tables
+		function renderHashTable(container) {
+			const buckets = treeData.buckets || [];
+			const slotWidth = 40, rowHeight = 54, entryHeight = 36, gap = 34;
+			svg = d3.select(container).append('svg');
+			addArrowMarker();
+			g = svg.append('g');
+
+			let maxX = slotWidth;
+			buckets.forEach((bucket, row) => {
+				const y = row * rowHeight;
+				g.append('text').attr('class', 'index-text').attr('x', -10).attr('y', y + entryHeight / 2).attr('dy', '.35em').attr('text-anchor', 'end').text(bucket.index);
+				g.append('rect').attr('class', 'cell' + (bucket.items.length ? '' : ' empty')).attr('x', 0).attr('y', y).attr('width', slotWidth).attr('height', entryHeight);
+				if (bucket.items.length) {
+					g.append('circle').attr('class', 'ptr-dot slot-dot').attr('cx', slotWidth / 2).attr('cy', y + entryHeight / 2).attr('r', 3);
+				} else {
+					g.append('line').attr('class', 'null-slash').attr('x1', 4).attr('y1', y + entryHeight - 4).attr('x2', slotWidth - 4).attr('y2', y + 4);
+				}
+
+				let x = slotWidth + gap;
+				let previousEnd = slotWidth / 2;
+				bucket.items.forEach(entry => {
+					const width = boxWidth(truncate(entry.label, 20), 64, 180);
+					arrow(g, previousEnd, y + entryHeight / 2, x - 2, y + entryHeight / 2);
+					const group = g.append('g')
+						.attr('class', 'item')
+						.attr('transform', 'translate(' + x + ',' + y + ')')
+						.on('click', () => showNodeInfo(itemData(entry)));
+					group.append('rect').attr('class', 'item-box').attr('width', width).attr('height', entryHeight);
+					group.append('text').attr('class', 'item-label').attr('x', width / 2).attr('y', entryHeight / 2).attr('dy', '.35em')
+						.attr('text-anchor', 'middle').text(truncate(entry.label, 20));
+					previousEnd = x + width;
+					x += width + gap;
+				});
+				maxX = Math.max(maxX, x);
+			});
+
+			let height = buckets.length * rowHeight;
+			if (treeData.hiddenCells) {
+				g.append('text').attr('class', 'index-text').attr('x', 0).attr('y', height + 10)
+					.text(treeData.hiddenCells + ' empty buckets not shown (capacity ' + treeData.capacity + ')');
+				height += 30;
+			}
+			fitSvg(container, -50, -30, maxX + 60, height + 50);
+		}
+
+		// ---------------------------------------------------------------- binary trees, n-ary trees, tries, heaps
+		function renderHierarchy(target, rootData, kind) {
+			const width = target.clientWidth || 800;
+			const height = target.clientHeight || 600;
+			const isBinary = kind === 'binaryTree' || kind === 'heap';
+
+			svg = d3.select(target)
 				.append('svg');
 
 			g = svg.append('g');
@@ -1189,7 +1581,10 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 				.nodeSize(isVertical ? [80, 110] : [80, 170]);
 
 			// Convert to D3 hierarchy
-			const root = d3.hierarchy(treeData.root, d => {
+			const root = d3.hierarchy(rootData, d => {
+				if (!isBinary) {
+					return d.children && d.children.length > 0 ? d.children : null;
+				}
 				const children = [];
 				if (d.left) children.push(d.left);
 				if (d.right) children.push(d.right);
@@ -1208,19 +1603,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 			const minY = d3.min(nodesList, screenY) - padding;
 			const contentWidth = d3.max(nodesList, screenX) + padding - minX;
 			const contentHeight = d3.max(nodesList, screenY) + padding - minY;
-			const scale = Math.max(0.5, Math.min(1, width / contentWidth, height / contentHeight));
-			const svgWidth = Math.max(width, contentWidth * scale);
-			const svgHeight = Math.max(height, contentHeight * scale);
-			const viewWidth = svgWidth / scale;
-			const viewHeight = svgHeight / scale;
-			svg.attr('width', svgWidth)
-				.attr('height', svgHeight)
-				.attr('viewBox', [
-					minX - (viewWidth - contentWidth) / 2,
-					minY - (viewHeight - contentHeight) / 2,
-					viewWidth,
-					viewHeight
-				].join(' '));
+			fitSvg(target, minX, minY, contentWidth, contentHeight);
 
 			// Store original positions for dragging
 			root.descendants().forEach(d => {
@@ -1255,9 +1638,36 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 					.on('drag', dragged)
 					.on('end', dragEnded));
 
-			// Add circles
+			// Add circles (trie nodes that end a word get a thicker border)
 			nodes.append('circle')
-				.attr('r', 30);
+				.attr('r', 30)
+				.attr('class', d => d.data.terminal ? 'terminal' : null);
+
+			if (nodesList.some(d => d.data.terminal)) {
+				g.append('text')
+					.attr('class', 'legend-text')
+					.attr('x', minX + 10)
+					.attr('y', minY + 14)
+					.text('White border: end of a word');
+			}
+
+			// Labels on links that carry information (dict keys of n-ary trees, unless the node shows the same text)
+			links.each(function(link) {
+				const label = link.target.data.edgeLabel;
+				if (label === undefined || label === link.target.data.value) {
+					return;
+				}
+				const sx = isVertical ? link.source.x : link.source.y;
+				const sy = isVertical ? link.source.y : link.source.x;
+				const tx = isVertical ? link.target.x : link.target.y;
+				const ty = isVertical ? link.target.y : link.target.x;
+				g.append('text')
+					.attr('class', 'edge-label')
+					.attr('x', (sx + tx) / 2)
+					.attr('y', (sy + ty) / 2 - 6)
+					.attr('text-anchor', 'middle')
+					.text(truncate(label, 10));
+			});
 
 			// Add labels inside circles (centered)
 			nodes.append('text')
@@ -1265,11 +1675,15 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 				.attr('x', 0)
 				.attr('y', 0)
 				.attr('text-anchor', 'middle')
-				.attr('font-size', '12px')
+				.attr('font-size', d => !isBinary && String(d.data.value).length > 5 ? '10px' : '12px')
 				.attr('font-weight', 'bold')
 				.attr('fill', 'var(--vscode-editor-foreground)')
 				.attr('pointer-events', 'none')
 				.text(d => {
+					if (!isBinary) {
+						// N-ary trees and tries: an unnamed node (trie root) shows a dot
+						return d.data.value === '' ? '·' : truncate(d.data.value, 7);
+					}
 					const value = String(d.data.value || 'null');
 					// Truncate if too long to fit in circle
 					return value.length > 5 ? value.substring(0, 5) + '...' : value;
@@ -1278,6 +1692,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 			// Add L/R indicators on children when parent has only one child
 			// The indicator appears on the child node itself
 			nodes.each(function(d) {
+				if (kind !== 'binaryTree') return;
 				// Check if this node is a child and if its parent has only one child
 				const parent = d.parent;
 				if (!parent) return; // Skip root node
@@ -1358,7 +1773,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 
 		// Close node info when clicking outside
 		document.addEventListener('click', (e) => {
-			if (!nodeInfo.contains(e.target) && !e.target.closest('.node')) {
+			if (!nodeInfo.contains(e.target) && !e.target.closest('.node, .item')) {
 				nodeInfo.style.display = 'none';
 			}
 		});

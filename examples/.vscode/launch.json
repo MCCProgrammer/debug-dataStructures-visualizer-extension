@@ -2,17 +2,17 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Python: trees_demo.py",
+			"name": "Python: current file",
 			"type": "debugpy",
 			"request": "launch",
-			"program": "${workspaceFolder}/python/trees_demo.py",
+			"program": "${file}",
 			"console": "integratedTerminal"
 		},
 		{
-			"name": "Java: TreesDemo",
+			"name": "Java: current file",
 			"type": "java",
 			"request": "launch",
-			"mainClass": "${workspaceFolder}/java/TreesDemo.java"
+			"mainClass": "${file}"
 		}
 	]
 }

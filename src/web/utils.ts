@@ -12,15 +12,20 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * Debugger value as people expect to read it: Java shows `Integer@24 "8"` or
- * `TreesDemo$TreeNode@22 "TreeNode(4)"`, which become `8` and `TreeNode(4)`
+ * Debugger value as people expect to read it: Java shows `Integer@24 "8"`,
+ * `TreesDemo$TreeNode@22 "TreeNode(4)"` or `StructuresDemo$DoubleListNode@49`,
+ * which become `8`, `TreeNode(4)` and `DoubleListNode@49`
  */
 export function cleanValue(value: any): any {
 	if (typeof value !== 'string') {
 		return value;
 	}
 	const match = /^[\w$.]+@[0-9a-f]+ "(.*)"$/s.exec(value);
-	return match ? match[1] : value;
+	if (match) {
+		return match[1];
+	}
+	// Drop the package and outer class names of an object reference
+	return /^[\w$.]+@\d+$/.test(value) ? value.replace(/^.*[.$](?=[^.$]+@\d+$)/, '') : value;
 }
 
 /**
