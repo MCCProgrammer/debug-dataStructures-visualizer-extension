@@ -4,6 +4,10 @@
   "description": "See your data structures while you debug: binary trees, linked lists, stacks, queues, heaps, hash tables, n-ary trees and tries, drawn live from Python and Java debug sessions.",
   "version": "2.0.0",
   "publisher": "MCCProgrammer",
+  "author": {
+    "name": "MCCProgrammer",
+    "email": "contact@mccprogrammer.com"
+  },
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"

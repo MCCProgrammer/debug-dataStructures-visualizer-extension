@@ -160,7 +160,7 @@ Change them in **Keyboard Shortcuts** (`Cmd+K Cmd+S` / `Ctrl+K Ctrl+S`) by searc
 
 **The tree is cut**: trees deeper than `dataStructuresVisualizer.maxDepth` (20 by default) are cut at that depth.
 
-Found a bug or have an idea? [Open an issue](https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension/issues).
+Found a bug or have an idea? [Open an issue](https://github.com/MCCProgrammer/debug-dataStructures-visualizer-extension/issues) or write to [contact@mccprogrammer.com](mailto:contact@mccprogrammer.com).
 
 ## 🗺️ Roadmap
 
@@ -171,6 +171,10 @@ Found a bug or have an idea? [Open an issue](https://github.com/MCCProgrammer/de
 ## ❤️ Support
 
 If the extension helps you, a [rating on the Marketplace](https://marketplace.visualstudio.com/items?itemName=MCCProgrammer.debug-dataStructures-visualizer-extension&ssr=false#review-details) or a coffee on [Ko-fi](https://ko-fi.com/mccprogrammer) makes a big difference.
+
+## 📬 Contact
+
+Questions, feedback or ideas: [contact@mccprogrammer.com](mailto:contact@mccprogrammer.com).
 
 ## 🤝 Contributing
 
