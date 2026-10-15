@@ -168,6 +168,10 @@ Found a bug or have an idea? [Open an issue](https://github.com/MCCProgrammer/de
 - Red-black trees with their colours, AVL trees with balance factors
 - Export a visualization as PNG or SVG
 
+## 🔢 Also by MCCProgrammer
+
+[Debug Sorting Algorithms Visualizer](https://marketplace.visualstudio.com/items?itemName=MCCProgrammer.debug-sorting-algorithms-visualizer) animates your own sorting code while you debug: every swap, shift and merge your Python or Java code makes on an array or a linked list. Plus a playground and stats for 8 sorting algorithms.
+
 ## ❤️ Support
 
 If the extension helps you, a [rating on the Marketplace](https://marketplace.visualstudio.com/items?itemName=MCCProgrammer.debug-dataStructures-visualizer-extension&ssr=false#review-details) or a coffee on [Ko-fi](https://ko-fi.com/mccprogrammer) makes a big difference.
